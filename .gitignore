@@ -1,0 +1,6 @@
+.*
+/bin/
+._*
+!.gitignore
+/vendor
+/dev
