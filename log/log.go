@@ -44,8 +44,8 @@ func NewLog(conf *config.Config) (*Log, error) {
 	if MaxAge > 0 {
 		MaxAgeInt = MaxAge
 	}
-
-	err := InitLogger(Filename, Level, MaxSizeInt, MaxBackupsInt, MaxAgeInt)
+	debug := conf.GetBool("local.debug")
+	err := InitLogger(Filename, Level, MaxSizeInt, MaxBackupsInt, MaxAgeInt, debug)
 	if err != nil {
 		return log, err
 	}
@@ -65,13 +65,13 @@ type LogConfig struct {
 
 var std *Logger
 
-func InitAccessLogger(Filename, Level string, MaxSize, MaxBackups, MaxAge int) *zap.Logger {
+func InitAccessLogger(filename, level string, maxSize, maxBackups, maxAge int) *zap.Logger {
 	cfg := new(LogConfig)
-	cfg.Filename = Filename
-	cfg.Level = Level
-	cfg.MaxSize = 1
-	cfg.MaxBackups = 5
-	cfg.MaxAge = 7
+	cfg.Filename = filename
+	cfg.Level = level
+	cfg.MaxSize = maxSize
+	cfg.MaxBackups = maxBackups
+	cfg.MaxAge = maxAge
 	writeSyncer := getLogWriter(cfg.Filename, cfg.MaxSize, cfg.MaxBackups, cfg.MaxAge)
 	encoder := getEncoder()
 	var l = new(zapcore.Level)
@@ -86,13 +86,13 @@ func InitAccessLogger(Filename, Level string, MaxSize, MaxBackups, MaxAge int) *
 }
 
 // InitLogger 初始化Logger
-func InitLogger(Filename, Level string, MaxSize, MaxBackups, MaxAge int) (err error) {
+func InitLogger(filename, level string, maxSize, maxBackups, maxAge int, debug bool) (err error) {
 	cfg := new(LogConfig)
-	cfg.Filename = Filename
-	cfg.Level = Level
-	cfg.MaxSize = 1
-	cfg.MaxBackups = 5
-	cfg.MaxAge = 7
+	cfg.Filename = filename
+	cfg.Level = level
+	cfg.MaxSize = maxSize
+	cfg.MaxBackups = maxBackups
+	cfg.MaxAge = maxAge
 	writeSyncer := getLogWriter(cfg.Filename, cfg.MaxSize, cfg.MaxBackups, cfg.MaxAge)
 	encoder := getEncoder()
 	var l = new(zapcore.Level)
@@ -100,13 +100,20 @@ func InitLogger(Filename, Level string, MaxSize, MaxBackups, MaxAge int) (err er
 	if err != nil {
 		return
 	}
-	core := zapcore.NewCore(encoder, writeSyncer, l)
+	var core zapcore.Core
+	if debug {
+		//输出到日志和控制台
+		core = zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(writeSyncer, zapcore.AddSync(os.Stdout)), l)
+	} else {
+		//只输出到日志
+		core = zapcore.NewCore(encoder, writeSyncer, l)
+	}
 
 	lg = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 	zap.ReplaceGlobals(lg) // 替换zap包中全局的logger实例，后续在其他包中只需使用zap.L()调用即可
 	logger := &Logger{
 		l:     lg,
-		level: LevelToNum(Level),
+		level: LevelToNum(level),
 	}
 	std = logger
 	Info = std.Info
