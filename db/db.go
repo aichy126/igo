@@ -1,13 +1,11 @@
 package db
 
 import (
-	"errors"
-	"reflect"
-	"sync"
+	"database/sql"
 
 	"github.com/aichy126/igo/config"
+	"github.com/aichy126/igo/log"
 	_ "github.com/go-sql-driver/mysql"
-	"github.com/spf13/viper"
 	"xorm.io/xorm"
 )
 
@@ -26,60 +24,100 @@ func NewDb(conf *config.Config) (*DB, error) {
 
 // Repo Reference xorm
 type Repo struct {
-	*xorm.Engine
+	Engine    *xorm.Engine
+	tableName string
 }
 
-func (s *DB) SelectDB(dbname string) *Repo {
-	return &Repo{s.Get(dbname).WriteDB}
+func (s *DB) NewDBTable(dbname string, tableName string) *Repo {
+	return &Repo{s.Get(dbname).WriteDB, tableName}
 }
-
-const (
-	default_idle_life_time = 3600
-)
-
-// DBResourceManager 数据库源地址管理
-type DBResourceManager struct {
-	mutex     sync.RWMutex
-	resources map[string]*DatabaseManager
-}
-
-func (db *DBResourceManager) Get(name string) *DatabaseManager {
-	db.mutex.RLock()
-	defer db.mutex.RUnlock()
-	return db.resources[name]
-}
-
-func New(conf *viper.Viper) *DBResourceManager {
-	m := &DBResourceManager{
-		resources: make(map[string]*DatabaseManager),
+func (repo *Repo) SetTableName(name string) {
+	if len(name) == 0 {
+		return
 	}
-	err := m.initFromToml(conf)
-	if err != nil && reflect.TypeOf(err) != reflect.TypeOf(dbconfigNotFound) {
-		panic(err)
-	}
-
-	return m
+	repo.tableName = name
 }
 
-var dbconfigNotFound = errors.New("notfound")
-
-func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
-	db.mutex.Lock()
-	defer db.mutex.Unlock()
-
-	mysqlList := make(map[string]*DBConfig, 0)
-	err := conf.UnmarshalKey("mysql", &mysqlList)
+func (repo *Repo) InsertOne(beans interface{}) (int64, error) {
+	sess := repo.Engine.NewSession()
+	defer sess.Close()
+	r, err := sess.InsertOne(beans)
 	if err != nil {
-		return err
+		log.Error("Mysql", log.Any("error", err.Error()))
 	}
-	for name, itemDBConfig := range mysqlList {
-		dm := new(DatabaseManager)
-		err := dm.initWriterDb(itemDBConfig)
-		if err != nil {
-			return err
-		}
-		db.resources[name] = dm
-		continue
+	return r, err
+}
+
+func (repo *Repo) Insert(beans ...interface{}) (int64, error) {
+	sess := repo.Engine.NewSession()
+	defer sess.Close()
+	r, err := sess.Insert(beans...)
+	if err != nil {
+		log.Error("Mysql", log.Any("error", err.Error()))
 	}
-	return nil
+	return r, err
+}
+
+func (repo *Repo) Get(bean interface{}) (bool, error) {
+	sess := repo.Engine.NewSession()
+	defer sess.Close()
+	r, err := sess.Get(bean)
+	if err != nil {
+		log.Error("Mysql", log.Any("error", err.Error()))
+	}
+	return r, err
+}
+
+func (repo *Repo) Where(query interface{}, args ...interface{}) *xorm.Session {
+	return repo.Engine.Table(repo.tableName).Where(query, args...)
+}
+
+func (repo *Repo) Select(query string) *xorm.Session {
+	return repo.Engine.Table(repo.tableName).Select(query)
+}
+
+func (repo *Repo) In(column string, args ...interface{}) *xorm.Session {
+	return repo.Engine.Table(repo.tableName).In(column, args...)
+}
+
+func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map[string][]byte, err error) {
+	sess := repo.Engine.NewSession()
+	args := make([]interface{}, 0)
+	args = append(args, sql)
+	args = append(args, paramStr...)
+	defer sess.Close()
+	r, err := sess.Query(args...)
+	if err != nil {
+		log.Error("Mysql", log.Any("error", err.Error()))
+	}
+	return r, err
+}
+
+func (repo *Repo) Find(bean interface{}, condiBeans ...interface{}) error {
+	sess := repo.Engine.NewSession()
+	defer sess.Close()
+	err := sess.Find(bean, condiBeans)
+	if err != nil {
+		log.Error("Mysql", log.Any("error", err.Error()))
+	}
+	return err
+}
+
+func (repo *Repo) Exec(sql string, args ...interface{}) (sql.Result, error) {
+	sess := repo.Engine.NewSession()
+	defer sess.Close()
+	params := make([]interface{}, 0, len(args)+1)
+	params = append(params, sql)
+	for _, arg := range args {
+		params = append(params, arg)
+	}
+	r, err := repo.Engine.Exec(params...)
+	if err != nil {
+		log.Error("Mysql", log.Any("error", err.Error()))
+	}
+	return r, err
+}
+
+func (repo *Repo) ShowSQL(b bool) {
+	repo.Engine.ShowSQL(b)
 }
