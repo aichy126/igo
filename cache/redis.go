@@ -41,15 +41,14 @@ func (rm *RedisManager) initRedis(conf *config.Config) (err error) {
 	rm.mutex.Lock()
 	defer rm.mutex.Unlock()
 	var rc redisConfig
-
-	redisList := conf.GetStringMap("redis")
+	redisList := make(map[string]*redisConfig, 0)
+	err = conf.UnmarshalKey("redis", &redisList)
+	if err != nil {
+		return
+	}
 
 	for name, itemRedisConfig := range redisList {
-		_, ok := itemRedisConfig.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		err = rc.parse(itemRedisConfig.(map[string]interface{}))
+		err = rc.parse(itemRedisConfig)
 		if err != nil {
 			log.Error("initRedis", log.Any("error", err.Error()))
 			continue

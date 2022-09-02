@@ -11,21 +11,4 @@ max_size = 1
 max_backups = 5
 max_age = 7
 
-[swaggerui]
-show = true
-protocol = "http"
-host = "127.0.0.1"
-address = ":8091"
-
-[redis.getsstars]
-address = "127.0.0.1:6379"
-password = ""
-db = 0
-poolsize = 50
-
-[mysql.igo]
-max_idle = 10
-max_open = 20
-is_debug = true
-datasource = ""
 

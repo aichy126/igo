@@ -5,8 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	//	"github.com/dropbox/godropbox/errors"
-
 	"xorm.io/xorm"
 )
 
@@ -43,20 +41,15 @@ func (db *DatabaseManager) Ping() error {
 	return nil
 }
 
-func (db *DatabaseManager) initWriterDb(tree map[string]interface{}) (err error) {
+func (db *DatabaseManager) initWriterDb(conf *DBConfig) (err error) {
 	var rc DBConfig
-	err = rc.parse(tree)
-	if err != nil {
-		return err
-	}
+	rc = *conf
 	db.WriteDB, err = rc.newDB()
 	if err != nil {
 		return
 	}
 	db.datasource = rc.Datasource
-
 	return
-
 }
 
 func (db *DatabaseManager) initWriteDbWithConfig(rc DBConfig) (err error) {
@@ -65,18 +58,7 @@ func (db *DatabaseManager) initWriteDbWithConfig(rc DBConfig) (err error) {
 		return
 	}
 	db.datasource = strings.TrimSpace(rc.Datasource)
-
 	return
-}
-
-func (db *DatabaseManager) init(conf map[string]interface{}) error {
-	var err error
-	err = db.initWriterDb(conf)
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 func (db *DatabaseManager) db(typ string) *xorm.Engine {

@@ -66,21 +66,20 @@ var dbconfigNotFound = errors.New("notfound")
 func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
-	dbTomlConf := conf.GetStringMap("mysql")
-	for name, itemDBConfig := range dbTomlConf {
-		_, ok := itemDBConfig.(map[string]interface{})
-		if !ok {
-			continue
-		}
+
+	mysqlList := make(map[string]*DBConfig, 0)
+	err := conf.UnmarshalKey("mysql", &mysqlList)
+	if err != nil {
+		return err
+	}
+	for name, itemDBConfig := range mysqlList {
 		dm := new(DatabaseManager)
-		err := dm.init(itemDBConfig.(map[string]interface{}))
+		err := dm.initWriterDb(itemDBConfig)
 		if err != nil {
 			return err
 		}
 		db.resources[name] = dm
 		continue
 	}
-
 	return nil
-
 }

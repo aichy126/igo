@@ -26,37 +26,8 @@ func (rc redisConfig) String() string {
 	return string(data)
 }
 
-func (rc *redisConfig) parse(conf map[string]interface{}) error {
-	var ok bool
-
-	//Address
-	_, ok = conf["address"].(string)
-	rc.Address = ""
-	if ok {
-		rc.Address = conf["address"].(string)
-	}
-
-	//Password
-	_, ok = conf["password"].(string)
-	rc.Password = ""
-	if ok {
-		rc.Password = conf["password"].(string)
-	}
-
-	//DB
-	_, ok = conf["db"].(int64)
-	rc.DB = 0
-	if ok {
-		rc.DB = int(conf["db"].(int64))
-	}
-	//PoolSize
-	_, ok = conf["poolsize"].(int64)
-	rc.PoolSize = 50
-	if ok {
-		rc.PoolSize = int(conf["poolsize"].(int64))
-	}
-
-	rc.normalize()
+func (rc *redisConfig) parse(conf *redisConfig) error {
+	conf.normalize()
 	return nil
 }
 
