@@ -35,11 +35,18 @@ func (repo *Repo) SetTableName(name string) {
 	if len(name) == 0 {
 		return
 	}
-	repo.tableName = name
+	repo.Engine.Table(name)
+}
+
+func (repo *Repo) NewSession() *xorm.Session {
+	var sess *xorm.Session
+	newSession := repo.Engine.NewSession()
+	sess = newSession.Table(repo.tableName)
+	return sess
 }
 
 func (repo *Repo) InsertOne(beans interface{}) (int64, error) {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.InsertOne(beans)
 	if err != nil {
@@ -49,7 +56,7 @@ func (repo *Repo) InsertOne(beans interface{}) (int64, error) {
 }
 
 func (repo *Repo) Insert(beans ...interface{}) (int64, error) {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.Insert(beans...)
 	if err != nil {
@@ -59,7 +66,7 @@ func (repo *Repo) Insert(beans ...interface{}) (int64, error) {
 }
 
 func (repo *Repo) Get(bean interface{}) (bool, error) {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.Get(bean)
 	if err != nil {
@@ -81,7 +88,7 @@ func (repo *Repo) In(column string, args ...interface{}) *xorm.Session {
 }
 
 func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map[string][]byte, err error) {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	args := make([]interface{}, 0)
 	args = append(args, sql)
 	args = append(args, paramStr...)
@@ -94,7 +101,7 @@ func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map
 }
 
 func (repo *Repo) Find(bean interface{}, condiBeans ...interface{}) error {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	defer sess.Close()
 	err := sess.Find(bean, condiBeans)
 	if err != nil {
@@ -104,7 +111,7 @@ func (repo *Repo) Find(bean interface{}, condiBeans ...interface{}) error {
 }
 
 func (repo *Repo) Exec(sql string, args ...interface{}) (sql.Result, error) {
-	sess := repo.Engine.NewSession()
+	sess := repo.NewSession()
 	defer sess.Close()
 	params := make([]interface{}, 0, len(args)+1)
 	params = append(params, sql)
