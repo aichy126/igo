@@ -76,15 +76,21 @@ func (repo *Repo) Get(bean interface{}) (bool, error) {
 }
 
 func (repo *Repo) Where(query interface{}, args ...interface{}) *xorm.Session {
-	return repo.Engine.Table(repo.tableName).Where(query, args...)
+	sess := repo.NewSession()
+	defer sess.Close()
+	return sess.Where(query, args...)
 }
 
 func (repo *Repo) Select(query string) *xorm.Session {
-	return repo.Engine.Table(repo.tableName).Select(query)
+	sess := repo.NewSession()
+	defer sess.Close()
+	return sess.Select(query)
 }
 
 func (repo *Repo) In(column string, args ...interface{}) *xorm.Session {
-	return repo.Engine.Table(repo.tableName).In(column, args...)
+	sess := repo.NewSession()
+	defer sess.Close()
+	return sess.In(column, args...)
 }
 
 func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map[string][]byte, err error) {
