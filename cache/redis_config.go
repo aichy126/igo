@@ -27,18 +27,16 @@ func (rc redisConfig) String() string {
 }
 
 func (rc *redisConfig) parse(conf *redisConfig) error {
-	conf.normalize()
-	return nil
-}
-
-func (rc *redisConfig) normalize() {
-	rc.Address = strings.TrimSpace(rc.Address)
-	rc.Password = strings.TrimSpace(rc.Password)
+	rc.Address = strings.TrimSpace(conf.Address)
+	rc.Password = strings.TrimSpace(conf.Password)
+	rc.DB = conf.DB
+	rc.PoolSize = conf.PoolSize
 	if !strings.Contains(rc.Address, ":") {
 		log.Error("redisconfig.address doesn't contains port", log.Any("rc.Address", rc.Address))
 
 		rc.Address = rc.Address + ":6379"
 	}
+	return nil
 }
 
 func (rc redisConfig) toOptions() *redis.Options {
