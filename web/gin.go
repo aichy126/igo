@@ -54,7 +54,7 @@ func NewWeb(conf *config.Config) (*Web, error) {
 		}
 		accesslogger := log.InitAccessLogger(AccessFilename, Level, MaxSizeInt, MaxBackupsInt, MaxAgeInt)
 		web.Router.Use(log.Ginzap(accesslogger, time.RFC3339, true))
-		web.Router.Use(log.RecoveryWithZap(accesslogger, true))
+		web.Router.Use(log.RecoveryWithZap(true))
 	}
 	return web, nil
 }
