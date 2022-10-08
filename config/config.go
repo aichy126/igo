@@ -11,6 +11,8 @@ import (
 )
 
 const EnvConfigPath = "CONFIG_PATH"
+const EnvConfigAddress = "CONFIG_ADDRESS"
+const EnvConfigKEY = "CONFIG_KEY"
 
 // Web
 type Config struct {
@@ -31,41 +33,46 @@ func NewConfig(ConfigPath string) (*Config, error) {
 	localConfig := viper.New()
 	localConfig.SetConfigFile(ConfigFilePath)
 	err := localConfig.ReadInConfig() // Find and read the config file
-	if err != nil {                   // Handle errors reading the config file
+	if err == nil {                   // Handle errors reading the config file
+		Conf.Viper = localConfig
+	}
+	var address, key string
+	exist := localConfig.IsSet("config")
+	if exist {
+		address = localConfig.GetString("config.address")
+		key = localConfig.GetString("config.key")
+	}
+	if address == "" || key == "" {
+		address = os.Getenv(EnvConfigAddress)
+		key = os.Getenv(EnvConfigKEY)
+	}
+	if address == "" || key == "" {
 		return Conf, err
 	}
-	Conf.Viper = localConfig
-	consulConfig, exist, err := getConsulConf(localConfig)
+	consulConfig, err := getConsulConf(address, key)
 	if err != nil {
 		return Conf, err
-	}
-	if exist {
+	} else {
 		Conf.Viper = consulConfig
 	}
-	return Conf, nil
+	return Conf, err
 }
 
-func getConsulConf(config *viper.Viper) (*viper.Viper, bool, error) {
+func getConsulConf(address, key string) (*viper.Viper, error) {
 	consulConfig := viper.New()
 	consulConfig.SetConfigType("toml")
-	exist := config.IsSet("config")
-	if !exist {
-		return consulConfig, exist, nil
-	}
-	address := config.GetString("config.address")
-	key := config.GetString("config.key")
 	if len(address) > 0 && len(key) > 0 {
 		newConfigClient(address)
 		t, err := GetByTree(key)
 		if err != nil {
-			return consulConfig, exist, err
+			return consulConfig, err
 		}
 		err = consulConfig.ReadConfig(bytes.NewBuffer(t))
 		if err != nil {
-			return consulConfig, exist, err
+			return consulConfig, err
 		}
 	}
-	return consulConfig, exist, nil
+	return consulConfig, nil
 }
 
 var client *consulapi.Client
