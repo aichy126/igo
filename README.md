@@ -1,6 +1,4 @@
-# igo
- [![Go Report Card](https://goreportcard.com/report/github.com/aichy126/igo)](https://goreportcard.com/report/github.com/aichy126/igo)
-
+# igo [![Go Report Card](https://goreportcard.com/badge/github.com/aichy126/igo)](https://goreportcard.com/report/github.com/aichy126/igo)
 golang web项目脚手架,对常用组件进行封装,通过配置文件初始化后即可方便使用,避免每次创建新项目都需要初始化各种组件的业务逻辑
 ## 包含组件
  -  `viper` github.com/spf13/viper 配置
