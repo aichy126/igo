@@ -11,7 +11,7 @@ func TestInitConfig(t *testing.T) {
 	if configPath == "" {
 		configPath = "./config.toml"
 	}
-	config, err := InitConfig(configPath)
+	config, err := NewConfig(configPath)
 	if err != nil {
 		panic(err)
 	}

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,8 +18,8 @@ import (
 // HttpClient只是对HttpSettings的再次封装，实际HttpSettings完全可以独立对外提供接口
 // 详见http_setting.go开头的示例
 // HttpClient直接继承自HttpSettings，故可以直接用它提供的接口
-
 // 用法 client:=NewClient().Debug(true).SetDefaultTimeout(timeout)
+
 var DefaultClient = NewClient()
 
 type HttpClient = HttpSettings
@@ -275,11 +274,11 @@ func readResponseBody(res *http.Response) error {
 		return nil
 	}
 	defer res.Body.Close()
-	buf, err := ioutil.ReadAll(res.Body)
+	buf, err := io.ReadAll(res.Body)
 	if err != nil {
 		return err
 	}
 
-	res.Body = ioutil.NopCloser(bytes.NewReader(buf))
+	res.Body = io.NopCloser(bytes.NewReader(buf))
 	return nil
 }

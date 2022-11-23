@@ -12,6 +12,6 @@ max_backups = 5
 max_age = 7
 
 
-[config]
-address = "xxx"
-key ="/xxx/xxx"
+#[config]
+#address = "xxx"
+#key ="/xxx/xxx"

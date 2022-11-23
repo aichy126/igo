@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	default_idle_life_time = 3600
+	defaultIdleLifeTime = 3600
 )
 
 type DBConfig struct {
@@ -37,7 +37,7 @@ func (db DBConfig) newDB() (engine *xorm.Engine, err error) {
 	orm.SetMaxOpenConns(db.MaxOpen)
 	orm.SetMaxIdleConns(db.MaxIdle)
 	if db.MaxIdleLife == 0 {
-		db.MaxIdleLife = default_idle_life_time
+		db.MaxIdleLife = defaultIdleLifeTime
 	}
 	orm.SetConnMaxLifetime(time.Duration(db.MaxIdleLife) * time.Second)
 	orm.ShowSQL(db.IsDebug)
@@ -60,14 +60,14 @@ func New(conf *viper.Viper) *DBResourceManager {
 		resources: make(map[string]*DatabaseManager),
 	}
 	err := m.initFromToml(conf)
-	if err != nil && reflect.TypeOf(err) != reflect.TypeOf(dbconfigNotFound) {
+	if err != nil && reflect.TypeOf(err) != reflect.TypeOf(dbConfigNotFound) {
 		panic(err)
 	}
 
 	return m
 }
 
-var dbconfigNotFound = errors.New("Db config not found")
+var dbConfigNotFound = errors.New("Db config not found")
 
 func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 	db.mutex.Lock()
@@ -114,7 +114,7 @@ func (db *DatabaseManager) initWriterDb(conf *DBConfig) (err error) {
 	return
 }
 
-// Ping
+// Ping Database
 func (db *DatabaseManager) Ping() error {
 	if db == nil {
 		return errors.New("invalid database config")
