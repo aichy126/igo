@@ -18,11 +18,11 @@ const (
 )
 
 type DBConfig struct {
-	MaxIdle     int    `json:"maxIdle" toml:"maxIdle" yaml:"maxIdle"`
-	MaxOpen     int    `json:"maxOpen" toml:"maxOpen" yaml:"maxOpen"`
-	MaxIdleLife int    `json:"maxIdleLife" toml:"maxIdleLife" yaml:"maxIdleLife"`
-	IsDebug     bool   `json:"isDebug" toml:"isDebug" yaml:"isDebug"`
-	Datasource  string `json:"dataSource" toml:"dataSource" yaml:"dataSource"`
+	MaxIdle     int    `json:"max_idle" toml:"max_idle" yaml:"max_idle"`
+	MaxOpen     int    `json:"max_open" toml:"max_open" yaml:"max_open"`
+	MaxIdleLife int    `json:"max_idle_life" toml:"max_idle_life" yaml:"max_idle_life"`
+	IsDebug     bool   `json:"is_debug" toml:"is_debug" yaml:"is_debug"`
+	Datasource  string `json:"data_source" toml:"data_source" yaml:"data_source"`
 }
 
 func (db DBConfig) newDB() (engine *xorm.Engine, err error) {

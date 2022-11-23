@@ -49,14 +49,14 @@ max_age = 7 #日志文件最多保存多少个备份
 
 
 [mysql.igo]
-maxIdle = 10
-maxOpen = 20
-isDebug = true
-dataSource = "root:root@tcp(127.0.0.1:3306)/igo?charset=utf8&interpolateParams=true&timeout=3s&readTimeout=3s&writeTimeout=3s"
+max_idle = 10
+max_open = 20
+is_debug = true
+data_source = "root:root@tcp(127.0.0.1:3306)/igo?interpolateParams=true&timeout=3s&readTimeout=3s&writeTimeout=3s"
 
-[redis.igo]
+[redis.igorediskey]
 address = "127.0.0.1:6379"
-password = "aichenyang"
+password = "xxx"
 db = 0
 poolsize = 50
 
@@ -83,16 +83,16 @@ key ="/igo/config"
 //配置文件 Conf是viper的封装
 igo.App.Conf.GetString("xxx.xxx")
 //日志 log是zap的封装
-log.Info("hello igo", log.Any("nowtime", time.Now().Unix()))
-log.Error("error", log.Any("nowtime", time.Now().Unix()))
+log.Info("hello igo", log.Any("now_time", time.Now().Unix()))
+log.Error("error", log.Any("now_time", time.Now().Unix()))
 //xorm db是xorm的封装
 db := igo.App.DB.NewDBTable("dbname", "news")
 session := db.Where("")
 err := session.OrderBy("id desc").Find(&rows)
 //redis
-//redisconfig是配置文件中的redis配置项
-redis, err := igo.App.Cache.Get("redisconfig")
-getRedisKey, err := redis.Get(ctx, "sfredsi").Result()
+//igorediskey是配置文件中的redis配置项
+redis, err := igo.App.Cache.Get("igorediskey")
+getRedisKey, err := redis.Get(ctx, "redis_key").Result()
 spew.Dump(getRedisKey, err)
 
 ```
