@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"crypto/des"
 	"encoding/hex"
+	"regexp"
 	"strconv"
+	"strings"
 )
 
 var e *Encryption
@@ -91,4 +93,37 @@ func PKCS7Padding(ciphertext []byte, blockSize int) []byte {
 	padding := blockSize - len(ciphertext)%blockSize
 	padtext := bytes.Repeat([]byte{0}, padding)
 	return append(ciphertext, padtext...)
+}
+
+// EmojiDecode 表情解码
+func EmojiDecode(s string) string {
+	//emoji表情的数据表达式
+	re := regexp.MustCompile("\\[[\\\\u0-9a-zA-Z]+\\]")
+	//提取emoji数据表达式
+	reg := regexp.MustCompile("\\[\\\\u|]")
+	src := re.FindAllString(s, -1)
+	for i := 0; i < len(src); i++ {
+		e := reg.ReplaceAllString(src[i], "")
+		p, err := strconv.ParseInt(e, 16, 32)
+		if err == nil {
+			s = strings.Replace(s, src[i], string(rune(p)), -1)
+		}
+	}
+	return s
+}
+
+// EmojiEnCode 表情转换
+func EmojiEnCode(s string) string {
+	ret := ""
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		if len(string(rs[i])) == 4 {
+			u := `[\u` + strconv.FormatInt(int64(rs[i]), 16) + `]`
+			ret += u
+
+		} else {
+			ret += string(rs[i])
+		}
+	}
+	return ret
 }

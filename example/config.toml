@@ -1,0 +1,12 @@
+[local]
+address = ":8001" # host and port
+debug   = true    # debug mode for Gin
+
+[local.logger]
+dir   = "./logs" #日志路径
+name   = "log.log" #日志路径
+access = true # 是否记录access日志
+level = "INFO"
+max_size = 1  #每个日志文件保存的最大尺寸 单位：M
+max_backups = 5 #文件最多保存多少天
+max_age = 7 #日志文件最多保存多少个备份
