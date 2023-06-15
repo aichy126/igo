@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aichy126/igo/log"
+	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"xorm.io/xorm"
@@ -18,11 +19,11 @@ const (
 )
 
 type DBConfig struct {
-	MaxIdle     int    `json:"max_idle" toml:"max_idle" yaml:"max_idle"`
-	MaxOpen     int    `json:"max_open" toml:"max_open" yaml:"max_open"`
-	MaxIdleLife int    `json:"max_idle_life" toml:"max_idle_life" yaml:"max_idle_life"`
-	IsDebug     bool   `json:"is_debug" toml:"is_debug" yaml:"is_debug"`
-	Datasource  string `json:"data_source" toml:"data_source" yaml:"data_source"`
+	MaxIdle     int    `json:"max_idle" toml:"max_idle" yaml:"max_idle" mapstructure:"max_idle"`
+	MaxOpen     int    `json:"max_open" toml:"max_open" yaml:"max_open" mapstructure:"max_open"`
+	MaxIdleLife int    `json:"max_idle_life" toml:"max_idle_life" yaml:"max_idle_life" mapstructure:"max_idle_life"`
+	IsDebug     bool   `json:"is_debug" toml:"is_debug" yaml:"is_debug" mapstructure:"is_debug"`
+	Datasource  string `json:"data_source" toml:"data_source" yaml:"data_source" mapstructure:"data_source"`
 }
 
 func (db DBConfig) newDB() (engine *xorm.Engine, err error) {
@@ -74,10 +75,16 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 	defer db.mutex.Unlock()
 
 	mysqlList := make(map[string]*DBConfig, 0)
-	err := conf.UnmarshalKey("mysql", &mysqlList)
-	if err != nil {
-		return err
+	list := conf.GetStringMap("mysql")
+	for k, v := range list {
+		data := new(DBConfig)
+		err := mapstructure.Decode(v, data)
+		if err != nil {
+			continue
+		}
+		mysqlList[k] = data
 	}
+
 	for name, itemDBConfig := range mysqlList {
 		dm := new(DatabaseManager)
 		err := dm.initWriterDb(itemDBConfig)
