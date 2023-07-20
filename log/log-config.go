@@ -46,6 +46,13 @@ func (l *Logger) Fatal(msg string, fields ...Field) {
 	l.l.Fatal(msg, fields...)
 }
 
+func CtxInfo(msg string, fields ...Field) {
+	std.l.WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
+}
+func CtxError(msg string, fields ...Field) {
+	std.l.WithOptions(zap.AddCallerSkip(1)).Error(msg, fields...)
+}
+
 var (
 	Skip        = zap.Skip
 	Binary      = zap.Binary
@@ -105,17 +112,17 @@ var (
 )
 
 // not safe for concurrent use
-func ResetDefault(l *Logger) {
-	l.l = lg
-	std = l
-	Info = std.Info
-	Warn = std.Warn
-	Error = std.Error
-	DPanic = std.DPanic
-	Panic = std.Panic
-	Fatal = std.Fatal
-	Debug = std.Debug
-}
+// func ResetDefault(l *Logger) {
+// 	l.l = lg
+// 	std = l
+// 	Info = std.Info
+// 	Warn = std.Warn
+// 	Error = std.Error
+// 	DPanic = std.DPanic
+// 	Panic = std.Panic
+// 	Fatal = std.Fatal
+// 	Debug = std.Debug
+// }
 
 type Logger struct {
 	l     *zap.Logger // zap ensure that zap.Logger is safe for concurrent use

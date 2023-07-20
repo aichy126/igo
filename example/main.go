@@ -26,7 +26,8 @@ func Ping(c *gin.Context) {
 	ctx := context.Ginform(c)
 	traceId, has := ctx.Get("traceId")
 	pc, file, line, ok := runtime.Caller(0)
-	ctx.Info("test", log.Any("test", "test"))
+	ctx.LogInfo("main", log.Any("test", "test"))
+	ctx.LogError("main", log.Any("test", "test"))
 	c.JSON(200, gin.H{
 		"message": "Hello World.",
 		"traceId": traceId,

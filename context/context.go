@@ -13,7 +13,6 @@ import (
 	"github.com/aichy126/igo/log"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 )
 
 const CommonContextKey = "context"
@@ -47,7 +46,8 @@ type IContext interface {
 	GetGoContext() context.Context
 	GetAllKey() map[string]interface{}
 	GetHttpRequest() *http.Request
-	Info(msg string, fields ...log.Field)
+	LogInfo(msg string, fields ...log.Field)
+	LogError(msg string, fields ...log.Field)
 }
 type contextImpl struct {
 	context.Context
@@ -328,13 +328,20 @@ func (ctx *contextImpl) GetHttpRequest() *http.Request {
 	return req
 }
 
-func (ctx *contextImpl) Info(msg string, fields ...log.Field) {
-	zap.AddCallerSkip(2)
+func (ctx *contextImpl) LogInfo(msg string, fields ...log.Field) {
 	traceId, has := ctx.get("traceId")
 	if has {
 		fields = append(fields, log.Any("traceId", traceId))
 	}
-	log.Info(msg, fields...)
+	log.CtxInfo(msg, fields...)
+}
+
+func (ctx *contextImpl) LogError(msg string, fields ...log.Field) {
+	traceId, has := ctx.get("traceId")
+	if has {
+		fields = append(fields, log.Any("traceId", traceId))
+	}
+	log.CtxInfo(msg, fields...)
 }
 
 type IGetter interface {
