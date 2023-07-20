@@ -8,6 +8,7 @@ import (
 	"github.com/aichy126/igo/config"
 	"github.com/aichy126/igo/log"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // Web
@@ -30,6 +31,8 @@ func NewWeb(conf *config.Config) (*Web, error) {
 	}
 	web.Router = gin.Default()
 	web.initRouters()
+	web.Router.Use(AddTraceId())
+
 	Wrap(web.Router)
 
 	//Monitor gin logs
@@ -57,6 +60,17 @@ func NewWeb(conf *config.Config) (*Web, error) {
 		web.Router.Use(log.RecoveryWithZap(true))
 	}
 	return web, nil
+}
+
+func AddTraceId() gin.HandlerFunc {
+	return func(g *gin.Context) {
+		traceId := g.GetHeader("traceId")
+		if traceId == "" {
+			traceId = uuid.New().String()
+		}
+		g.Set("traceId", traceId)
+		g.Next()
+	}
 }
 
 func (s *Web) initRouters() {

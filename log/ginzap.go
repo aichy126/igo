@@ -46,6 +46,7 @@ func Ginzap(logger *zap.Logger, timeFormat string, utc bool) gin.HandlerFunc {
 		} else {
 			logger.Info(path,
 				zap.Int("status", c.Writer.Status()),
+				zap.String("traceId", c.GetString("traceId")),
 				zap.String("method", c.Request.Method),
 				zap.String("path", path),
 				zap.String("query", query),

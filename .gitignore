@@ -4,3 +4,4 @@
 !.gitignore
 /vendor
 /dev
+*.log

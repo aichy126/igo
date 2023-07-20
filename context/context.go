@@ -12,6 +12,8 @@ import (
 
 	"github.com/aichy126/igo/log"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const CommonContextKey = "context"
@@ -45,6 +47,7 @@ type IContext interface {
 	GetGoContext() context.Context
 	GetAllKey() map[string]interface{}
 	GetHttpRequest() *http.Request
+	Info(msg string, fields ...log.Field)
 }
 type contextImpl struct {
 	context.Context
@@ -86,6 +89,13 @@ func NewContextWithGinHeader(c *gin.Context) IContext {
 	//继承gin header
 	for k, v := range c.Request.Header {
 		ctx.Set(k, v)
+	}
+	//继承gin traceId
+	traceId := c.GetString("traceId")
+	if traceId != "" {
+		ctx.Set("traceId", traceId)
+	} else {
+		ctx.Set("traceId", uuid.New().String())
 	}
 	return ctx
 }
@@ -316,6 +326,15 @@ func (ctx *contextImpl) GetHttpRequest() *http.Request {
 		return nil
 	}
 	return req
+}
+
+func (ctx *contextImpl) Info(msg string, fields ...log.Field) {
+	zap.AddCallerSkip(2)
+	traceId, has := ctx.get("traceId")
+	if has {
+		fields = append(fields, log.Any("traceId", traceId))
+	}
+	log.Info(msg, fields...)
 }
 
 type IGetter interface {

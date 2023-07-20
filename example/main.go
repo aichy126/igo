@@ -1,7 +1,11 @@
 package main
 
 import (
+	"runtime"
+
 	"github.com/aichy126/igo"
+	"github.com/aichy126/igo/context"
+	"github.com/aichy126/igo/log"
 	"github.com/aichy126/igo/util"
 	"github.com/gin-gonic/gin"
 )
@@ -19,5 +23,17 @@ func Router(r *gin.Engine) {
 }
 
 func Ping(c *gin.Context) {
-	c.JSON(200, gin.H{"message": "Hello World."})
+	ctx := context.Ginform(c)
+	traceId, has := ctx.Get("traceId")
+	pc, file, line, ok := runtime.Caller(0)
+	ctx.Info("test", log.Any("test", "test"))
+	c.JSON(200, gin.H{
+		"message": "Hello World.",
+		"traceId": traceId,
+		"has":     has,
+		"file":    file,
+		"pc":      pc,
+		"line":    line,
+		"ok":      ok,
+	})
 }
