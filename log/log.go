@@ -3,6 +3,7 @@ package log
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/aichy126/igo/config"
 	"github.com/natefinch/lumberjack"
@@ -120,12 +121,18 @@ func InitLogger(filename, level string, maxSize, maxBackups, maxAge int, debug b
 }
 
 func getEncoder() zapcore.Encoder {
+
+	customTimeEncoder := func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(t.Format("2006-01-02 15:04:05.000"))
+	}
+
 	encoderConfig := zap.NewProductionEncoderConfig()
 	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 	encoderConfig.TimeKey = "time"
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoderConfig.EncodeDuration = zapcore.SecondsDurationEncoder
 	encoderConfig.EncodeCaller = zapcore.ShortCallerEncoder
+	encoderConfig.EncodeTime = customTimeEncoder
 	return zapcore.NewJSONEncoder(encoderConfig)
 }
 
