@@ -11,7 +11,7 @@ import (
 func main() {
 	igo.App = igo.NewApp("") //初始化各个组件
 	debug := util.ConfGetbool("local.debug")
-	util.CDump(debug)
+	util.Dump(debug)
 	Router(igo.App.Web.Router) //引入 gin路由
 	igo.App.Web.Run()
 }
@@ -26,6 +26,7 @@ func Ping(c *gin.Context) {
 	log.Info("main-info", log.Any("info", "test"))
 	ctx.LogInfo("main-info", log.Any("info", "test"))
 	ctx.LogError("main-error", log.Any("error", "test"))
+	util.Dump(traceId, has, ctx)
 	c.JSON(200, gin.H{
 		"message": "Hello World.",
 		"traceId": traceId,

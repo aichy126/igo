@@ -1,20 +1,17 @@
 package util
 
 import (
-	"fmt"
+	"os"
 
-	"github.com/davecgh/go-spew/spew"
+	"github.com/gookit/goutil/dump"
 )
 
-func Dump(a ...interface{}) {
-	spew.Dump(a)
-}
+const defaultSkip = 3
 
-// CDump 带颜色输出
-func CDump(a ...interface{}) {
-	fmt.Print("\x1b[33;44m")                  //设置颜色样式
-	fmt.Print("==========[dump]==========\n") //设置颜色样式
-	spew.Dump(a)
-	fmt.Print("==========================") //设置颜色样式
-	fmt.Print("\x1b[0m\n")                  //样式结束符,清楚之前的显示属性
+var (
+	std = dump.NewDumper(os.Stdout, defaultSkip)
+)
+
+func Dump(vs ...any) {
+	std.Print(vs...)
 }
