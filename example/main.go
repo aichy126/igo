@@ -18,6 +18,7 @@ func main() {
 
 func Router(r *gin.Engine) {
 	r.GET("ping", Ping)
+	r.GET("tools", Tools)
 }
 
 func Ping(c *gin.Context) {
@@ -31,5 +32,14 @@ func Ping(c *gin.Context) {
 		"message": "Hello World.",
 		"traceId": traceId,
 		"has":     has,
+	})
+}
+
+func Tools(c *gin.Context) {
+	num := 123456
+	util.Dump(num, util.String(num), util.Int64(util.String(num)))
+
+	c.JSON(200, gin.H{
+		"num": util.String(num),
 	})
 }
