@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/aichy126/igo"
 	"github.com/aichy126/igo/context"
+	"github.com/aichy126/igo/example/dao"
 	"github.com/aichy126/igo/log"
 	"github.com/aichy126/igo/util"
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,8 @@ func main() {
 
 func Router(r *gin.Engine) {
 	r.GET("ping", Ping)
-	r.GET("tools", Tools)
+	r.GET("db/search", DbSearch)
+	r.GET("db/sync", DbSyncSqlite)
 }
 
 func Ping(c *gin.Context) {
@@ -35,11 +37,24 @@ func Ping(c *gin.Context) {
 	})
 }
 
-func Tools(c *gin.Context) {
-	num := 123456
-	util.Dump(num, util.String(num), util.Int64(util.String(num)))
-
+func DbSearch(c *gin.Context) {
+	idStr := c.Query("id")
+	id := util.Int64(idStr)
+	db := dao.NewTestDbDao()
+	ctx := context.Ginform(c)
+	info, has, err := db.Info(ctx, id)
 	c.JSON(200, gin.H{
-		"num": util.String(num),
+		"info": info,
+		"has":  has,
+		"err":  err,
+	})
+}
+
+func DbSyncSqlite(c *gin.Context) {
+	db := dao.NewTestDbDao()
+	ctx := context.Ginform(c)
+	err := db.Sync(ctx)
+	c.JSON(200, gin.H{
+		"err": err,
 	})
 }

@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gookit/goutil v0.6.11
 	github.com/hashicorp/consul/api v1.12.0
+	github.com/mattn/go-sqlite3 v1.14.9
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/natefinch/lumberjack v2.0.0+incompatible
 	github.com/pkg/errors v0.9.1
