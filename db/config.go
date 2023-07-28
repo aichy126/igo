@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aichy126/igo/log"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"
 	"github.com/spf13/viper"
@@ -24,12 +25,13 @@ type DBConfig struct {
 	MaxIdleLife int    `json:"max_idle_life" toml:"max_idle_life" yaml:"max_idle_life" mapstructure:"max_idle_life"`
 	IsDebug     bool   `json:"is_debug" toml:"is_debug" yaml:"is_debug" mapstructure:"is_debug"`
 	Datasource  string `json:"data_source" toml:"data_source" yaml:"data_source" mapstructure:"data_source"`
+	DbType      string `json:"-" toml:"-" yaml:"-" mapstructure:"-"`
 }
 
 func (db DBConfig) newDB() (engine *xorm.Engine, err error) {
-	orm, err := xorm.NewEngine("mysql", db.Datasource)
+	orm, err := xorm.NewEngine(db.DbType, db.Datasource)
 	if err != nil {
-		err = errors.Wrap(err, "conn mysql error ")
+		err = errors.Wrap(err, "conn xorm db error ")
 		return
 	}
 
@@ -75,13 +77,26 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 	defer db.mutex.Unlock()
 
 	mysqlList := make(map[string]*DBConfig, 0)
-	list := conf.GetStringMap("mysql")
-	for k, v := range list {
+	mysqlConfigList := conf.GetStringMap("mysql")
+	sqliteConfigList := conf.GetStringMap("sqlite")
+
+	for k, v := range mysqlConfigList {
 		data := new(DBConfig)
 		err := mapstructure.Decode(v, data)
 		if err != nil {
 			continue
 		}
+		data.DbType = "mysql"
+		mysqlList[k] = data
+	}
+
+	for k, v := range sqliteConfigList {
+		data := new(DBConfig)
+		err := mapstructure.Decode(v, data)
+		if err != nil {
+			continue
+		}
+		data.DbType = "sqlite3"
 		mysqlList[k] = data
 	}
 
