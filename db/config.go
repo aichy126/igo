@@ -156,3 +156,19 @@ func (db *DatabaseManager) Ping() error {
 
 	return nil
 }
+
+// Close 关闭所有数据库连接
+func (db *DBResourceManager) Close() error {
+	db.mutex.Lock()
+	defer db.mutex.Unlock()
+
+	for name, manager := range db.resources {
+		log.Info("正在关闭数据库连接", log.Any("name", name))
+		if manager.WriteDB != nil {
+			if err := manager.WriteDB.Close(); err != nil {
+				log.Error("关闭数据库连接失败", log.Any("name", name), log.Any("error", err))
+			}
+		}
+	}
+	return nil
+}

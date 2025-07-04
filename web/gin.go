@@ -1,20 +1,22 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/aichy126/igo/config"
 	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/trace"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // Web
 type Web struct {
 	Router *gin.Engine
 	conf   *config.Config
+	server *http.Server
 }
 
 // NewWeb
@@ -29,10 +31,16 @@ func NewWeb(conf *config.Config) (*Web, error) {
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	web.Router = gin.Default()
-	web.initRouters()
+	web.Router = gin.New()
+
+	// 添加中间件
+	web.Router.Use(ErrorHandler())
+	web.Router.Use(LoggerMiddleware())
+	web.Router.Use(SecurityMiddleware())
+	web.Router.Use(CORSMiddleware())
 	web.Router.Use(AddTraceId())
 
+	web.initRouters()
 	Wrap(web.Router)
 
 	//Monitor gin logs
@@ -64,12 +72,40 @@ func NewWeb(conf *config.Config) (*Web, error) {
 
 func AddTraceId() gin.HandlerFunc {
 	return func(g *gin.Context) {
-		traceId := g.GetHeader("traceId")
-		if traceId == "" {
-			traceId = uuid.New().String()
+		// 从请求头提取追踪信息
+		ctx, err := trace.ExtractFromHTTPRequest(g.Request)
+		if err != nil {
+			// 如果提取失败，创建新的追踪上下文
+			ctx = g.Request.Context()
 		}
-		g.Set("traceId", traceId)
+
+		// 开始HTTP请求span
+		spanCtx, span := trace.GlobalTracer.StartSpan(ctx, "HTTP "+g.Request.Method+" "+g.Request.URL.Path,
+			trace.WithAttributes(map[string]string{
+				"http.method":     g.Request.Method,
+				"http.url":        g.Request.URL.String(),
+				"http.user_agent": g.Request.UserAgent(),
+				"http.remote_ip":  g.ClientIP(),
+			}),
+		)
+
+		// 将追踪上下文设置到gin context
+		g.Set("traceContext", spanCtx)
+		g.Set("traceSpan", span)
+
+		// 将traceId设置到gin context以保持向后兼容
+		traceID := trace.GetTraceID(spanCtx)
+		if traceID != "" {
+			g.Set("traceId", string(traceID))
+		}
+
+		// 处理请求
 		g.Next()
+
+		// 结束span
+		if span != nil {
+			trace.EndSpan(span, nil)
+		}
 	}
 }
 
@@ -88,8 +124,40 @@ func (s *Web) initRouters() {
 		}
 		c.JSON(http.StatusOK, routerArr)
 	})
+
+	// 添加健康检查接口
+	s.Router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ok",
+			"time":   time.Now().Format(time.RFC3339),
+		})
+	})
+
+	// 添加就绪检查接口
+	s.Router.GET("/ready", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status": "ready",
+			"time":   time.Now().Format(time.RFC3339),
+		})
+	})
 }
 
-func (s *Web) Run() {
-	s.Router.Run(s.conf.Get("local.address").(string))
+func (s *Web) Run() error {
+	addr := s.conf.Get("local.address").(string)
+	s.server = &http.Server{
+		Addr:    addr,
+		Handler: s.Router,
+	}
+
+	log.Info("Web服务器启动", log.Any("address", addr))
+	return s.server.ListenAndServe()
+}
+
+// Shutdown 优雅关闭Web服务器
+func (s *Web) Shutdown(ctx context.Context) error {
+	if s.server != nil {
+		log.Info("正在关闭Web服务器...")
+		return s.server.Shutdown(ctx)
+	}
+	return nil
 }

@@ -128,3 +128,11 @@ func (repo *Repo) Exec(sql string, args ...interface{}) (sql.Result, error) {
 func (repo *Repo) ShowSQL(b bool) {
 	repo.Engine.ShowSQL(b)
 }
+
+// Close 关闭所有数据库连接
+func (s *DB) Close() error {
+	if s.DBResourceManager != nil {
+		return s.DBResourceManager.Close()
+	}
+	return nil
+}

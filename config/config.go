@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sync"
 
+	"github.com/fsnotify/fsnotify"
 	consulapi "github.com/hashicorp/consul/api"
 	"github.com/spf13/viper"
 )
@@ -17,6 +19,9 @@ const EnvConfigKEY = "CONFIG_KEY"
 // Web
 type Config struct {
 	*viper.Viper
+	mu sync.RWMutex
+	// 配置变更回调
+	changeCallbacks []func()
 }
 
 func NewConfig(ConfigPath string) (*Config, error) {
@@ -103,4 +108,89 @@ func GetLocalConfigPath() string {
 	confPath := flag.String("c", "config.toml", "configure file")
 	flag.Parse()
 	return *confPath
+}
+
+// Validate 验证配置
+func (c *Config) Validate() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// 验证必要的配置项
+	requiredFields := []string{
+		"local.address",
+		"local.debug",
+	}
+
+	for _, field := range requiredFields {
+		if !c.IsSet(field) {
+			return fmt.Errorf("缺少必要的配置项: %s", field)
+		}
+	}
+
+	return nil
+}
+
+// WatchConfig 监听配置变更
+func (c *Config) WatchConfig() {
+	c.Viper.WatchConfig()
+	c.Viper.OnConfigChange(func(e fsnotify.Event) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		// 执行配置变更回调
+		for _, callback := range c.changeCallbacks {
+			callback()
+		}
+	})
+}
+
+// AddChangeCallback 添加配置变更回调
+func (c *Config) AddChangeCallback(callback func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.changeCallbacks = append(c.changeCallbacks, callback)
+}
+
+// GetWithDefault 获取配置值，如果不存在则返回默认值
+func (c *Config) GetWithDefault(key string, defaultValue interface{}) interface{} {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.IsSet(key) {
+		return c.Get(key)
+	}
+	return defaultValue
+}
+
+// GetStringWithDefault 获取字符串配置值，如果不存在则返回默认值
+func (c *Config) GetStringWithDefault(key, defaultValue string) string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.IsSet(key) {
+		return c.GetString(key)
+	}
+	return defaultValue
+}
+
+// GetIntWithDefault 获取整数配置值，如果不存在则返回默认值
+func (c *Config) GetIntWithDefault(key string, defaultValue int) int {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.IsSet(key) {
+		return c.GetInt(key)
+	}
+	return defaultValue
+}
+
+// GetBoolWithDefault 获取布尔配置值，如果不存在则返回默认值
+func (c *Config) GetBoolWithDefault(key string, defaultValue bool) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if c.IsSet(key) {
+		return c.GetBool(key)
+	}
+	return defaultValue
 }

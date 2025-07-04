@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/trace"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 const CommonContextKey = "context"
@@ -48,6 +48,11 @@ type IContext interface {
 	GetHttpRequest() *http.Request
 	LogInfo(msg string, fields ...log.Field)
 	LogError(msg string, fields ...log.Field)
+
+	// 新增：业务span相关方法
+	StartBusinessSpan(name string) IContext
+	EndBusinessSpan(err error)
+	GetBusinessSpan() *trace.Span
 }
 type contextImpl struct {
 	context.Context
@@ -86,17 +91,25 @@ func NewContext() IContext {
 
 func NewContextWithGinHeader(c *gin.Context) IContext {
 	ctx := WithContext(context.Background())
-	//继承gin header
+
+	// 继承gin header
 	for k, v := range c.Request.Header {
 		ctx.Set(k, v)
 	}
-	//继承gin traceId
+
+	// 获取追踪上下文
+	if traceCtx, exists := c.Get("traceContext"); exists {
+		if spanCtx, ok := traceCtx.(context.Context); ok {
+			ctx.Context = spanCtx
+		}
+	}
+
+	// 继承gin traceId（保持向后兼容）
 	traceId := c.GetString("traceId")
 	if traceId != "" {
 		ctx.Set("traceId", traceId)
-	} else {
-		ctx.Set("traceId", uuid.New().String())
 	}
+
 	return ctx
 }
 
@@ -329,19 +342,95 @@ func (ctx *contextImpl) GetHttpRequest() *http.Request {
 }
 
 func (ctx *contextImpl) LogInfo(msg string, fields ...log.Field) {
-	traceId, has := ctx.get("traceId")
-	if has {
-		fields = append(fields, log.Any("traceId", traceId))
-	}
-	log.CtxInfo(msg, fields...)
+	// 获取trace信息
+	traceFields := ctx.getTraceFields()
+	// 合并所有字段
+	allFields := append(traceFields, fields...)
+	log.CtxInfo(msg, allFields...)
 }
 
 func (ctx *contextImpl) LogError(msg string, fields ...log.Field) {
-	traceId, has := ctx.get("traceId")
-	if has {
+	// 获取trace信息
+	traceFields := ctx.getTraceFields()
+	// 合并所有字段
+	allFields := append(traceFields, fields...)
+	log.CtxInfo(msg, allFields...)
+}
+
+// getTraceFields 获取trace相关字段
+func (ctx *contextImpl) getTraceFields() []log.Field {
+	var fields []log.Field
+
+	// 获取traceId（向后兼容）
+	if traceId, has := ctx.get("traceId"); has {
 		fields = append(fields, log.Any("traceId", traceId))
 	}
-	log.CtxInfo(msg, fields...)
+
+	// 获取span信息
+	if span := ctx.GetBusinessSpan(); span != nil {
+		fields = append(fields,
+			log.String("trace_id", string(span.TraceID)),
+			log.String("span_id", string(span.SpanID)),
+		)
+
+		// 如果有父span，也添加父span信息
+		if span.ParentID != "" {
+			fields = append(fields, log.String("parent_id", string(span.ParentID)))
+		}
+
+		// 添加span名称
+		if spanName, has := ctx.get("businessSpanName"); has {
+			fields = append(fields, log.String("span_name", fmt.Sprintf("%v", spanName)))
+		}
+	}
+
+	return fields
+}
+
+// StartBusinessSpan 开始业务span
+func (ctx *contextImpl) StartBusinessSpan(name string) IContext {
+	// 创建业务span
+	businessCtx, businessSpan := trace.GlobalTracer.StartSpan(ctx.Context, name)
+
+	// 创建新的context实例
+	newCtx := &contextImpl{
+		Context: businessCtx,
+		Keys:    make(map[string]interface{}),
+		meta:    make(map[string]string),
+	}
+
+	// 复制原有的keys和meta
+	for k, v := range ctx.Keys {
+		newCtx.Keys[k] = v
+	}
+	for k, v := range ctx.meta {
+		newCtx.meta[k] = v
+	}
+
+	// 存储业务span信息
+	newCtx.Set("businessSpan", businessSpan)
+	newCtx.Set("businessSpanName", name)
+
+	return newCtx
+}
+
+// EndBusinessSpan 结束业务span
+func (ctx *contextImpl) EndBusinessSpan(err error) {
+	if businessSpan, exists := ctx.Get("businessSpan"); exists {
+		if span, ok := businessSpan.(*trace.Span); ok {
+			trace.EndSpan(span, err)
+		}
+	}
+}
+
+// GetBusinessSpan 获取业务span
+func (ctx *contextImpl) GetBusinessSpan() *trace.Span {
+	if businessSpan, exists := ctx.Get("businessSpan"); exists {
+		if span, ok := businessSpan.(*trace.Span); ok {
+			return span
+		}
+	}
+	return nil
 }
 
 type IGetter interface {
@@ -361,4 +450,37 @@ func Ginform(c IGetter) IContext {
 		return NewContextWithGinHeader(ginctx)
 	}
 	return NewContext()
+}
+
+// GinformWithSpan 创建带业务span的context
+func GinformWithSpan(c IGetter, spanName string) IContext {
+	ctx := Ginform(c)
+
+	// 如果已经有trace context，创建子span
+	if traceCtx, exists := c.(*gin.Context).Get("traceContext"); exists {
+		if spanCtx, ok := traceCtx.(context.Context); ok {
+			// 创建业务span
+			businessCtx, businessSpan := trace.GlobalTracer.StartSpan(spanCtx, spanName)
+
+			// 将业务span信息存储到context中
+			ctx.Set("businessSpan", businessSpan)
+			ctx.Set("businessSpanName", spanName)
+
+			// 更新context的底层context
+			ctx.(*contextImpl).Context = businessCtx
+
+			return ctx
+		}
+	}
+
+	return ctx
+}
+
+// EndBusinessSpan 结束业务span
+func EndBusinessSpan(ctx IContext, err error) {
+	if businessSpan, exists := ctx.Get("businessSpan"); exists {
+		if span, ok := businessSpan.(*trace.Span); ok {
+			trace.EndSpan(span, err)
+		}
+	}
 }
