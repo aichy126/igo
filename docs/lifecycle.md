@@ -1,32 +1,50 @@
 # 生命周期管理
 
-> **注意**: `lifecycle.go` 文件已移动到 `lifecycle/` 目录下，通过接口设计避免循环导入问题。
-
 ## 概述
 
-igo脚手架现在提供了完整的应用生命周期管理功能，包括优雅启动、优雅关闭、信号处理、分布式追踪（traceId）等。
+IGo 脚手架提供简化的应用生命周期管理功能，专注于钩子管理和信号处理，不干预具体的组件管理。
+
+## 设计原则
+
+- **简化职责**: 只处理钩子执行和信号监听，不直接管理具体组件
+- **灵活扩展**: 通过钩子机制支持自定义初始化和清理逻辑
+- **优雅关闭**: 监听系统信号，确保应用能够优雅退出
 
 ## 主要功能
 
-### 1. 优雅关闭
-- 自动处理SIGINT和SIGTERM信号
-- 按顺序关闭各个组件（Web服务器、数据库、缓存）
-- 支持自定义关闭超时时间
-- 确保正在处理的请求能够完成
+### 1. 生命周期钩子
 
-### 2. 生命周期钩子
-- 启动钩子：应用启动时执行
-- 关闭钩子：应用关闭时执行
-- 支持多个钩子的顺序执行
+支持启动和关闭钩子的注册和执行：
 
-### 3. 健康检查
-- `/health` - 健康检查接口
-- `/ready` - 就绪检查接口
+```go
+// 启动钩子：应用启动时执行
+igo.App.AddStartupHook(func() error {
+    log.Info("初始化外部资源")
+    return nil
+})
 
-### 4. 分布式追踪
-- HTTP请求自动生成和透传 traceId
-- 支持自定义span、事件、属性
-- 详细说明请参考 [分布式追踪文档](tracing.md)
+// 关闭钩子：应用关闭时执行
+igo.App.AddShutdownHook(func() error {
+    log.Info("清理资源")
+    return nil
+})
+```
+
+### 2. 信号处理
+
+自动监听系统信号：
+- `SIGINT` (Ctrl+C)
+- `SIGTERM` (终止信号)
+
+### 3. 简化的应用接口
+
+```go
+// 运行应用（等待信号）
+err := igo.App.Run()
+
+// 手动关闭应用
+err := igo.App.Shutdown()
+```
 
 ## 使用方法
 
@@ -36,128 +54,130 @@ igo脚手架现在提供了完整的应用生命周期管理功能，包括优�
 package main
 
 import (
+    "log"
     "github.com/aichy126/igo"
-    "github.com/aichy126/igo/log"
+    ilog "github.com/aichy126/igo/log"
 )
 
 func main() {
     // 初始化应用
-    igo.App = igo.NewApp("config.toml")
-
-    // 设置路由
-    Router(igo.App.Web.Router)
-
-    // 使用生命周期管理器运行
-    if err := igo.App.RunWithLifecycle(); err != nil {
-        log.Error("应用运行失败", log.Any("error", err))
+    app, err := igo.NewApp("")
+    if err != nil {
+        log.Fatal("应用初始化失败:", err)
     }
-}
-```
-
-### 添加生命周期钩子
-
-```go
-func main() {
-    igo.App = igo.NewApp("config.toml")
+    igo.App = app
 
     // 添加启动钩子
     igo.App.AddStartupHook(func() error {
-        log.Info("应用启动钩子执行")
-        // 执行启动时的初始化工作
+        ilog.Info("应用启动完成")
         return nil
     })
 
     // 添加关闭钩子
     igo.App.AddShutdownHook(func() error {
-        log.Info("应用关闭钩子执行")
-        // 执行关闭时的清理工作
+        ilog.Info("应用正在关闭")
         return nil
     })
 
-    // 运行应用
-    igo.App.RunWithLifecycle()
+    // 设置路由
+    setupRoutes(igo.App.Web.Router)
+
+    // 启动Web服务器（在goroutine中）
+    go func() {
+        if err := igo.App.Web.Run(); err != nil {
+            ilog.Error("Web服务器启动失败", ilog.Any("error", err))
+        }
+    }()
+
+    // 运行生命周期管理器（等待信号）
+    if err := igo.App.Run(); err != nil {
+        ilog.Error("应用运行失败", ilog.Any("error", err))
+    }
 }
 ```
 
-### 手动优雅关闭
+### 钩子执行顺序
+
+1. **启动时**: 按添加顺序执行启动钩子
+2. **关闭时**: 按添加顺序的**逆序**执行关闭钩子
 
 ```go
-// 手动触发优雅关闭
-if err := igo.App.GracefulShutdown(30 * time.Second); err != nil {
-    log.Error("优雅关闭失败", log.Any("error", err))
-}
+// 添加顺序：Hook1 -> Hook2 -> Hook3
+igo.App.AddShutdownHook(hook1)
+igo.App.AddShutdownHook(hook2) 
+igo.App.AddShutdownHook(hook3)
+
+// 执行顺序：Hook3 -> Hook2 -> Hook1
 ```
 
-## 关闭顺序
+### 钩子最佳实践
 
-应用关闭时，会按以下顺序执行：
+#### 启动钩子示例
 
-1. 执行关闭钩子（反向顺序）
-2. 关闭Web服务器（停止接受新请求，等待现有请求完成）
-3. 关闭数据库连接
-4. 关闭缓存连接
+```go
+// 数据库连接验证
+igo.App.AddStartupHook(func() error {
+    if igo.App.DB != nil {
+        // 验证数据库连接
+        return validateDatabaseConnection()
+    }
+    return nil
+})
 
-## 配置
-
-可以在配置文件中设置关闭超时时间：
-
-```toml
-[local]
-address = ":8091"
-debug = true
-shutdown_timeout = 30  # 关闭超时时间（秒）
-
-[local.logger]
-dir = "./logs"
-name = "log.log"
-access = true
-level = "INFO"
-max_size = 1
-max_backups = 5
-max_age = 7
+// 外部服务健康检查
+igo.App.AddStartupHook(func() error {
+    return checkExternalServices()
+})
 ```
 
-## 监控接口
+#### 关闭钩子示例
 
-### 健康检查
-```bash
-curl http://localhost:8091/health
+```go
+// 完成正在处理的任务
+igo.App.AddShutdownHook(func() error {
+    return finishPendingTasks()
+})
+
+// 清理临时文件
+igo.App.AddShutdownHook(func() error {
+    return cleanupTempFiles()
+})
+
+// 关闭外部连接
+igo.App.AddShutdownHook(func() error {
+    return closeExternalConnections()
+})
 ```
 
-响应：
-```json
-{
-    "status": "ok",
-    "time": "2024-01-01T12:00:00Z"
-}
-```
+## 错误处理
 
-### 就绪检查
-```bash
-curl http://localhost:8091/ready
-```
+### 启动钩子错误
 
-响应：
-```json
-{
-    "status": "ready",
-    "time": "2024-01-01T12:00:00Z"
-}
-```
+- 任何启动钩子返回错误会**终止应用启动**
+- 建议在钩子中进行适当的错误处理和重试
 
-## 最佳实践
+### 关闭钩子错误
 
-1. **启动钩子**：用于初始化外部资源、预热缓存、加载配置等
-2. **关闭钩子**：用于保存状态、清理临时文件、通知其他服务等
-3. **超时设置**：根据应用复杂度设置合适的关闭超时时间
-4. **错误处理**：在钩子中妥善处理错误，避免影响应用关闭流程
-5. **日志记录**：在关键步骤添加日志，便于问题排查
-6. **分布式追踪**：所有日志、RPC、DB操作建议都带上 traceId，便于全链路追踪
+- 关闭钩子的错误会被**记录但不会阻止关闭流程**
+- 确保关闭逻辑尽可能简单可靠
 
 ## 注意事项
 
-1. 关闭钩子中的操作应该是幂等的
-2. 避免在钩子中执行长时间阻塞的操作
-3. 确保所有外部连接都能正确关闭
-4. 在生产环境中建议设置合理的关闭超时时间
-5. 分布式追踪建议全链路透传，便于排查分布式问题
+1. **职责边界**: 生命周期管理器只负责钩子执行，不直接管理Web服务器、数据库等组件
+2. **组件管理**: Web服务器需要在业务代码中手动启动（通常在goroutine中）
+3. **静默失败**: 可选组件（db/cache）的初始化失败不会影响应用启动
+4. **钩子简洁**: 保持钩子逻辑简单，避免长时间阻塞操作
+
+## 与原版本的差异
+
+### 简化前（v1.x）
+- 复杂的组件接口和应用接口
+- 多套关闭机制
+- 直接管理Web服务器、数据库等组件
+
+### 简化后（v2.0）
+- 简化为4个核心方法：`Run()`, `Shutdown()`, `AddStartupHook()`, `AddShutdownHook()`
+- 统一的钩子机制
+- 只负责信号处理，不直接管理具体组件
+
+这种设计更好地体现了脚手架的定位：专注于基础设施协调，不干预业务逻辑。

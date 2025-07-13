@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/aichy126/igo"
-	"github.com/aichy126/igo/context"
 	"github.com/aichy126/igo/db"
+	"github.com/aichy126/igo/ictx"
 )
 
 type Test0 struct {
@@ -37,7 +37,7 @@ func NewTestDbDao() *TestDbDao {
 	}
 }
 
-func (m *TestDbDao) Info(ctx context.IContext, ID int64) (*Test0, bool, error) {
+func (m *TestDbDao) Info(ctx ictx.Context, ID int64) (*Test0, bool, error) {
 	Data := new(Test0)
 	has, err := m.db.Where("id =? ", ID).Get(Data)
 	if err != nil {
@@ -46,7 +46,7 @@ func (m *TestDbDao) Info(ctx context.IContext, ID int64) (*Test0, bool, error) {
 	return Data, has, nil
 }
 
-func (m *TestDbDao) Sync(ctx context.IContext) error {
+func (m *TestDbDao) Sync(ctx ictx.Context) error {
 	m.db.Engine.Sync(new(Test0), new(Test1), new(Test2))
 	return nil
 }

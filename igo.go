@@ -3,9 +3,6 @@ package igo
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/aichy126/igo/cache"
@@ -21,158 +18,115 @@ type Application struct {
 	Web   *web.Web
 	DB    *db.DB
 	Cache *cache.Cache
-	// 添加关闭相关的字段
-	shutdownCtx    context.Context
-	shutdownCancel context.CancelFunc
-	// 添加生命周期管理器
+	// 生命周期管理器
 	lifecycle *lifecycle.LifecycleManager
 }
 
 var App *Application
 
-func NewApp(ConfigPath string) *Application {
+// NewApp 创建应用实例
+func NewApp(ConfigPath string) (*Application, error) {
 	a := new(Application)
-	// 创建关闭上下文
-	a.shutdownCtx, a.shutdownCancel = context.WithCancel(context.Background())
 
 	//config
 	conf, err := config.NewConfig(ConfigPath)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("配置文件加载失败: %w", err)
 	}
 
 	// 验证配置
 	if err := conf.Validate(); err != nil {
-		panic(fmt.Sprintf("配置验证失败: %v", err))
+		return nil, fmt.Errorf("配置验证失败: %w", err)
 	}
 
 	a.Conf = conf
 
+	// 根据配置源类型自动启动热重载监听
+	if a.Conf.IsHotReloadEnabled() {
+		go a.Conf.WatchConfig()
+	}
+
 	//web
 	web, err := web.NewWeb(conf)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("Web服务初始化失败: %w", err)
 	}
 	a.Web = web
 
 	//log
 	_, err = log.NewLog(conf)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("日志系统初始化失败: %w", err)
 	}
 
-	//db
-	db, err := db.NewDb(conf)
+	//db (可选组件，失败时静默处理，不提醒)
+	dbInstance, err := db.NewDb(conf)
 	if err != nil {
-		panic(err)
+		// 静默处理：创建一个空的db实例，避免nil指针
+		a.DB = &db.DB{}
+	} else {
+		a.DB = dbInstance
 	}
-	a.DB = db
 
-	//cahce
-	cache, err := cache.NewCache(conf)
+	//cache (可选组件，失败时静默处理，不提醒)
+	cacheInstance, err := cache.NewCache(conf)
 	if err != nil {
-		panic(err)
+		// 静默处理：创建一个空的cache实例，避免nil指针
+		a.Cache = &cache.Cache{}
+	} else {
+		a.Cache = cacheInstance
 	}
-	a.Cache = cache
 
-	// 初始化生命周期管理器
-	a.lifecycle = lifecycle.NewLifecycleManager(a)
+	// 初始化生命周期管理器（传入nil，简化接口）
+	a.lifecycle = lifecycle.NewLifecycleManager(nil)
 
-	return a
-}
-
-// GracefulShutdown 优雅关闭应用
-func (a *Application) GracefulShutdown(timeout time.Duration) error {
-	log.Info("开始优雅关闭应用...")
-
-	// 设置关闭超时
-	ctx, cancel := context.WithTimeout(a.shutdownCtx, timeout)
-	defer cancel()
-
-	// 关闭Web服务器
-	if a.Web != nil {
+	// 自动注册所有组件的优雅关闭（按依赖关系反向顺序）
+	// 1. 首先关闭Web服务器（停止接收新请求）
+	a.lifecycle.AddShutdownHook(func() error {
 		log.Info("正在关闭Web服务器...")
-		if err := a.Web.Shutdown(ctx); err != nil {
-			log.Error("关闭Web服务器失败", log.Any("error", err))
-		}
+		return a.Web.Shutdown(context.Background())
+	})
+
+	// 2. 然后关闭缓存连接（如果存在）
+	if a.Cache != nil && a.Cache.RedisManager != nil {
+		a.lifecycle.AddShutdownHook(func() error {
+			log.Info("正在关闭缓存连接...")
+			return a.Cache.Close()
+		})
 	}
 
-	// 关闭数据库连接
-	if a.DB != nil {
-		log.Info("正在关闭数据库连接...")
-		if err := a.DB.Close(); err != nil {
-			log.Error("关闭数据库连接失败", log.Any("error", err))
-		}
+	// 3. 最后关闭数据库连接（如果存在）
+	if a.DB != nil && a.DB.DBResourceManager != nil {
+		a.lifecycle.AddShutdownHook(func() error {
+			log.Info("正在关闭数据库连接...")
+			return a.DB.Close()
+		})
 	}
 
-	// 关闭缓存连接
-	if a.Cache != nil {
-		log.Info("正在关闭缓存连接...")
-		if err := a.Cache.Close(); err != nil {
-			log.Error("关闭缓存连接失败", log.Any("error", err))
-		}
-	}
-
-	log.Info("应用已优雅关闭")
-	return nil
+	return a, nil
 }
 
-// RunWithGracefulShutdown 运行应用并处理优雅关闭
-func (a *Application) RunWithGracefulShutdown() {
-	// 启动Web服务器
+// Run 运行应用（启动Web服务器并等待关闭信号）
+func (a *Application) Run() error {
+	// 在goroutine中启动Web服务器
 	go func() {
 		if err := a.Web.Run(); err != nil {
-			log.Error("Web服务器启动失败", log.Any("error", err))
+			log.Error("Web服务器运行失败", log.Any("error", err))
 		}
 	}()
 
-	// 等待关闭信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Info("收到关闭信号，开始优雅关闭...")
-
-	// 触发关闭上下文
-	a.shutdownCancel()
-
-	// 执行优雅关闭
-	if err := a.GracefulShutdown(30 * time.Second); err != nil {
-		log.Error("优雅关闭失败", log.Any("error", err))
-		os.Exit(1)
-	}
+	// 运行生命周期管理器（等待信号并处理优雅关闭）
+	return a.lifecycle.Run()
 }
 
-// GetShutdownContext 获取关闭上下文
-func (a *Application) GetShutdownContext() context.Context {
-	return a.shutdownCtx
+// RunWithGracefulShutdown 直接运行应用并处理优雅关闭（简化用法）
+func (a *Application) RunWithGracefulShutdown() error {
+	return a.Run()
 }
 
-// GetLifecycleManager 获取生命周期管理器
-func (a *Application) GetLifecycleManager() *lifecycle.LifecycleManager {
-	return a.lifecycle
-}
-
-// GetWeb 获取Web服务器（实现AppInterface）
-func (a *Application) GetWeb() interface {
-	Run() error
-	Shutdown(ctx context.Context) error
-} {
-	return a.Web
-}
-
-// GetDB 获取数据库（实现AppInterface）
-func (a *Application) GetDB() interface {
-	Close() error
-} {
-	return a.DB
-}
-
-// GetCache 获取缓存（实现AppInterface）
-func (a *Application) GetCache() interface {
-	Close() error
-} {
-	return a.Cache
+// Shutdown 关闭应用
+func (a *Application) Shutdown() error {
+	return a.lifecycle.GracefulShutdown(10 * time.Second)
 }
 
 // AddShutdownHook 添加关闭钩子
@@ -189,7 +143,31 @@ func (a *Application) AddStartupHook(hook func() error) {
 	}
 }
 
-// RunWithLifecycle 使用生命周期管理器运行应用
-func (a *Application) RunWithLifecycle() error {
-	return a.lifecycle.Run()
+// AddConfigChangeCallback 添加配置变更回调
+func (a *Application) AddConfigChangeCallback(callback func()) {
+	if a.Conf != nil {
+		a.Conf.AddChangeCallback(callback)
+	}
+}
+
+// SetConfigHotReloadInterval 设置配置热重载轮询间隔
+// intervalSeconds: 轮询间隔秒数，-1或0表示禁用热重载，>0表示启用并设置间隔
+// 注意：仅对Consul配置有效，文件配置自动启用热重载
+func (a *Application) SetConfigHotReloadInterval(intervalSeconds int) *Application {
+	if a.Conf != nil {
+		a.Conf.SetHotReloadInterval(intervalSeconds)
+		// 如果设置了有效间隔且之前没有启动监听，现在启动
+		if intervalSeconds > 0 && a.Conf.IsHotReloadEnabled() {
+			go a.Conf.WatchConfig()
+		}
+	}
+	return a
+}
+
+// ReloadConfig 手动重新加载配置
+func (a *Application) ReloadConfig() error {
+	if a.Conf != nil {
+		return a.Conf.ReloadConfig()
+	}
+	return fmt.Errorf("配置实例不存在")
 }

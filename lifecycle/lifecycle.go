@@ -12,34 +12,23 @@ import (
 	"github.com/aichy126/igo/log"
 )
 
-// AppInterface 应用接口，避免循环导入
-type AppInterface interface {
-	GetWeb() interface {
-		Run() error
-		Shutdown(ctx context.Context) error
-	}
-	GetDB() interface {
-		Close() error
-	}
-	GetCache() interface {
-		Close() error
-	}
-}
-
 // LifecycleManager 应用生命周期管理器
 type LifecycleManager struct {
-	app           AppInterface
-	shutdownHooks []func() error
-	startupHooks  []func() error
-	mu            sync.RWMutex
+	shutdownHooks  []func() error
+	startupHooks   []func() error
+	mu             sync.RWMutex
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
 }
 
 // NewLifecycleManager 创建生命周期管理器
-func NewLifecycleManager(app AppInterface) *LifecycleManager {
+func NewLifecycleManager(_ interface{}) *LifecycleManager {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &LifecycleManager{
-		app:           app,
-		shutdownHooks: make([]func() error, 0),
-		startupHooks:  make([]func() error, 0),
+		shutdownHooks:  make([]func() error, 0),
+		startupHooks:   make([]func() error, 0),
+		shutdownCtx:    ctx,
+		shutdownCancel: cancel,
 	}
 }
 
@@ -57,71 +46,39 @@ func (lm *LifecycleManager) AddStartupHook(hook func() error) {
 	lm.startupHooks = append(lm.startupHooks, hook)
 }
 
-// Run 运行应用
+// Run 运行应用（简化版本，只处理钩子和信号）
 func (lm *LifecycleManager) Run() error {
 	// 执行启动钩子
 	if err := lm.executeStartupHooks(); err != nil {
 		return fmt.Errorf("启动钩子执行失败: %w", err)
 	}
 
-	// 启动Web服务器
-	go func() {
-		if err := lm.app.GetWeb().Run(); err != nil {
-			log.Error("Web服务器启动失败", log.Any("error", err))
-		}
-	}()
-
 	// 等待关闭信号
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Info("收到关闭信号，开始优雅关闭...")
+	log.Info("收到关闭信号，开始执行关闭钩子...")
 
-	// 执行优雅关闭
-	if err := lm.GracefulShutdown(30 * time.Second); err != nil {
-		log.Error("优雅关闭失败", log.Any("error", err))
+	// 执行关闭钩子
+	if err := lm.executeShutdownHooks(); err != nil {
+		log.Error("关闭钩子执行失败", log.Any("error", err))
 		return err
 	}
 
 	return nil
 }
 
-// GracefulShutdown 优雅关闭
+// GracefulShutdown 优雅关闭（简化版本）
 func (lm *LifecycleManager) GracefulShutdown(timeout time.Duration) error {
 	log.Info("开始优雅关闭应用...")
 
-	// 设置关闭超时
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// 触发关闭上下文
+	lm.shutdownCancel()
 
 	// 执行关闭钩子
 	if err := lm.executeShutdownHooks(); err != nil {
 		log.Error("执行关闭钩子失败", log.Any("error", err))
-	}
-
-	// 关闭Web服务器
-	if lm.app.GetWeb() != nil {
-		log.Info("正在关闭Web服务器...")
-		if err := lm.app.GetWeb().Shutdown(ctx); err != nil {
-			log.Error("关闭Web服务器失败", log.Any("error", err))
-		}
-	}
-
-	// 关闭数据库连接
-	if lm.app.GetDB() != nil {
-		log.Info("正在关闭数据库连接...")
-		if err := lm.app.GetDB().Close(); err != nil {
-			log.Error("关闭数据库连接失败", log.Any("error", err))
-		}
-	}
-
-	// 关闭缓存连接
-	if lm.app.GetCache() != nil {
-		log.Info("正在关闭缓存连接...")
-		if err := lm.app.GetCache().Close(); err != nil {
-			log.Error("关闭缓存连接失败", log.Any("error", err))
-		}
 	}
 
 	log.Info("应用已优雅关闭")
@@ -156,4 +113,9 @@ func (lm *LifecycleManager) executeShutdownHooks() error {
 		}
 	}
 	return nil
+}
+
+// GetShutdownContext 获取关闭上下文
+func (lm *LifecycleManager) GetShutdownContext() context.Context {
+	return lm.shutdownCtx
 }

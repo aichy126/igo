@@ -17,7 +17,10 @@ type DB struct {
 // NewDb
 func NewDb(conf *config.Config) (*DB, error) {
 	db := new(DB)
-	manager := New(conf.Viper)
+	manager, err := New(conf.Viper)
+	if err != nil {
+		return nil, err
+	}
 	db.DBResourceManager = manager
 	return db, nil
 }

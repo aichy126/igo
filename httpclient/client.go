@@ -2,364 +2,283 @@ package httpclient
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
+	"math"
 	"net/http"
-	"net/http/cookiejar"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
-	igocontext "github.com/aichy126/igo/context"
+	"github.com/aichy126/igo/ictx"
+	"github.com/aichy126/igo/log"
 )
 
-// Config HTTP客户端配置
-type Config struct {
-	Timeout         time.Duration
-	ConnectTimeout  time.Duration
-	MaxRetries      int
-	RetryDelay      time.Duration
-	UserAgent       string
-	FollowRedirects bool
-	EnableCookies   bool
-	Proxy           func(*http.Request) (*url.URL, error)
-	TLSConfig       *tls.Config
-	Transport       http.RoundTripper
+// RetryConfig 重试配置
+type RetryConfig struct {
+	MaxRetries  int           // 最大重试次数
+	InitialWait time.Duration // 初始等待时间
+	MaxWait     time.Duration // 最大等待时间
+	BackoffRate float64       // 退避倍率
 }
 
-// DefaultConfig 默认配置
-func DefaultConfig() *Config {
-	return &Config{
-		Timeout:         30 * time.Second,
-		ConnectTimeout:  10 * time.Second,
-		MaxRetries:      0,
-		RetryDelay:      time.Second,
-		UserAgent:       "IGo-HTTP-Client/1.0",
-		FollowRedirects: true,
-		EnableCookies:   false,
+// Client 简化的HTTP客户端
+type Client struct {
+	client        *http.Client
+	baseURL       string
+	retryConfig   *RetryConfig
+	userAgent     string
+	debug         bool
+	defaultHeaders http.Header
+}
+
+// New 创建新的HTTP客户端
+func New() *Client {
+	return &Client{
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+		retryConfig:    nil, // 默认不启用重试
+		debug:          false,
+		defaultHeaders: make(http.Header),
 	}
 }
 
-// Request HTTP请求
+// NewWithTimeout 创建带超时的HTTP客户端
+func NewWithTimeout(timeout time.Duration) *Client {
+	return &Client{
+		client: &http.Client{
+			Timeout: timeout,
+		},
+		retryConfig:    nil, // 默认不启用重试
+		debug:          false,
+		defaultHeaders: make(http.Header),
+	}
+}
+
+// SetDefaultTimeout 设置默认超时时间
+func (c *Client) SetDefaultTimeout(timeout time.Duration) *Client {
+	c.client.Timeout = timeout
+	return c
+}
+
+// SetDefaultRetries 设置默认重试次数
+func (c *Client) SetDefaultRetries(maxRetries int) *Client {
+	c.retryConfig = &RetryConfig{
+		MaxRetries:  maxRetries,
+		InitialWait: 100 * time.Millisecond,
+		MaxWait:     5 * time.Second,
+		BackoffRate: 2.0,
+	}
+	return c
+}
+
+// SetUserAgent 设置User-Agent
+func (c *Client) SetUserAgent(userAgent string) *Client {
+	c.userAgent = userAgent
+	return c
+}
+
+// Debug 设置调试模式
+func (c *Client) Debug(debug bool) *Client {
+	c.debug = debug
+	return c
+}
+
+// SetHeader 设置默认请求头
+func (c *Client) SetHeader(key, value string) *Client {
+	c.defaultHeaders.Set(key, value)
+	return c
+}
+
+// SetHeaders 批量设置默认请求头
+func (c *Client) SetHeaders(headers map[string]string) *Client {
+	for key, value := range headers {
+		c.defaultHeaders.Set(key, value)
+	}
+	return c
+}
+
+// AddHeader 添加默认请求头（不覆盖已存在的）
+func (c *Client) AddHeader(key, value string) *Client {
+	c.defaultHeaders.Add(key, value)
+	return c
+}
+
+// SetTLSClientConfig 设置TLS配置
+func (c *Client) SetTLSClientConfig(config *tls.Config) *Client {
+	if c.client.Transport == nil {
+		c.client.Transport = &http.Transport{}
+	}
+	if transport, ok := c.client.Transport.(*http.Transport); ok {
+		transport.TLSClientConfig = config
+	}
+	return c
+}
+
+// SetBaseURL 设置基础URL
+func (c *Client) SetBaseURL(baseURL string) *Client {
+	c.baseURL = strings.TrimSuffix(baseURL, "/")
+	return c
+}
+
+// Request HTTP请求结构
 type Request struct {
-	Method      string
-	URL         string
-	Headers     http.Header
-	QueryParams url.Values
-	Body        interface{}
-	Timeout     time.Duration
-	Retries     int
+	Method string
+	URL    string
+	Body   io.Reader
+	Header http.Header
 }
 
-// NewRequest 创建新请求
-func NewRequest(method, rawurl string) *Request {
-	return &Request{
-		Method:      strings.ToUpper(method),
-		URL:         rawurl,
-		Headers:     make(http.Header),
-		QueryParams: url.Values{},
-	}
-}
-
-// SetHeader 设置请求头
-func (r *Request) SetHeader(key, value string) *Request {
-	r.Headers.Set(key, value)
-	return r
-}
-
-// SetHeaders 批量设置请求头
-func (r *Request) SetHeaders(headers map[string]string) *Request {
-	for k, v := range headers {
-		r.Headers.Set(k, v)
-	}
-	return r
-}
-
-// AddQuery 添加查询参数
-func (r *Request) AddQuery(key, value string) *Request {
-	r.QueryParams.Add(key, value)
-	return r
-}
-
-// SetQuery 设置查询参数
-func (r *Request) SetQuery(key, value string) *Request {
-	r.QueryParams.Set(key, value)
-	return r
-}
-
-// SetBody 设置请求体
-func (r *Request) SetBody(body interface{}) *Request {
-	r.Body = body
-	return r
-}
-
-// SetJSONBody 设置JSON请求体
-func (r *Request) SetJSONBody(body interface{}) *Request {
-	r.Headers.Set("Content-Type", "application/json")
-	r.Body = body
-	return r
-}
-
-// SetFormBody 设置表单请求体
-func (r *Request) SetFormBody(data url.Values) *Request {
-	r.Headers.Set("Content-Type", "application/x-www-form-urlencoded")
-	r.Body = data
-	return r
-}
-
-// SetTimeout 设置超时
-func (r *Request) SetTimeout(timeout time.Duration) *Request {
-	r.Timeout = timeout
-	return r
-}
-
-// SetRetries 设置重试次数
-func (r *Request) SetRetries(retries int) *Request {
-	r.Retries = retries
-	return r
-}
-
-// buildURL 构建完整URL
-func (r *Request) buildURL() string {
-	if len(r.QueryParams) == 0 {
-		return r.URL
-	}
-	return r.URL + "?" + r.QueryParams.Encode()
-}
-
-// buildBody 构建请求体
-func (r *Request) buildBody() (io.Reader, error) {
-	if r.Body == nil {
-		return nil, nil
-	}
-
-	switch v := r.Body.(type) {
-	case io.Reader:
-		return v, nil
-	case []byte:
-		return bytes.NewReader(v), nil
-	case string:
-		return strings.NewReader(v), nil
-	case url.Values:
-		return strings.NewReader(v.Encode()), nil
-	default:
-		// 尝试JSON序列化
-		data, err := json.Marshal(v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal body: %w", err)
-		}
-		return bytes.NewReader(data), nil
-	}
-}
-
-// Response HTTP响应
+// Response HTTP响应结构
 type Response struct {
 	*http.Response
 	Body []byte
 }
 
-// StatusCode 获取状态码
-func (r *Response) StatusCode() int {
-	return r.Response.StatusCode
-}
-
-// IsSuccess 是否成功
-func (r *Response) IsSuccess() bool {
-	return r.StatusCode() >= 200 && r.StatusCode() < 300
-}
-
-// IsClientError 是否客户端错误
-func (r *Response) IsClientError() bool {
-	return r.StatusCode() >= 400 && r.StatusCode() < 500
-}
-
-// IsServerError 是否服务器错误
-func (r *Response) IsServerError() bool {
-	return r.StatusCode() >= 500
-}
-
-// JSON 解析JSON响应
+// JSON 解析响应为JSON
 func (r *Response) JSON(target interface{}) error {
 	return json.Unmarshal(r.Body, target)
 }
 
-// String 获取字符串响应
+// String 获取响应字符串
 func (r *Response) String() string {
 	return string(r.Body)
 }
 
-// Bytes 获取字节响应
-func (r *Response) Bytes() []byte {
-	return r.Body
+// Do 执行HTTP请求（核心方法，不包含重试）
+func (c *Client) Do(ctx ictx.Context, req *Request) (*Response, error) {
+	return c.doSingleRequest(ctx, req)
 }
 
-// Error 错误信息
-func (r *Response) Error() string {
-	if r.IsSuccess() {
-		return ""
+// DoWithRetry 执行HTTP请求（带重试功能）
+func (c *Client) DoWithRetry(ctx ictx.Context, req *Request) (*Response, error) {
+	// 如果没有配置重试，直接执行单次请求
+	if c.retryConfig == nil || c.retryConfig.MaxRetries <= 0 {
+		return c.doSingleRequest(ctx, req)
 	}
-	return fmt.Sprintf("HTTP %d: %s", r.StatusCode(), r.String())
+	
+	var lastErr error
+	
+	// 执行重试逻辑
+	for attempt := 0; attempt <= c.retryConfig.MaxRetries; attempt++ {
+		// 如果不是第一次尝试，等待一段时间
+		if attempt > 0 {
+			waitTime := c.calculateBackoff(attempt)
+			if ctx != nil && c.debug {
+				ctx.LogInfo("HTTP请求重试",
+					log.Int("attempt", attempt+1),
+					log.String("wait", waitTime.String()),
+					log.String("lastError", lastErr.Error()))
+			}
+			time.Sleep(waitTime)
+		}
+		
+		// 执行单次请求
+		resp, err := c.doSingleRequest(ctx, req)
+		if err == nil {
+			// 成功则直接返回
+			if attempt > 0 && ctx != nil && c.debug {
+				ctx.LogInfo("HTTP请求重试成功", log.Int("totalAttempts", attempt+1))
+			}
+			return resp, nil
+		}
+		
+		// 检查是否应该重试
+		if !c.shouldRetry(err, resp) {
+			return resp, err
+		}
+		
+		lastErr = err
+	}
+	
+	// 所有重试都失败
+	if ctx != nil {
+		ctx.LogError("HTTP请求最终失败",
+			log.Int("totalAttempts", c.retryConfig.MaxRetries+1),
+			log.String("finalError", lastErr.Error()))
+	}
+	return nil, lastErr
 }
 
-// Client HTTP客户端
-type Client struct {
-	config *Config
-	client *http.Client
-	chain  *Chain
-	mu     sync.RWMutex
-}
-
-// NewClient 创建新客户端
-func NewClient(config *Config) *Client {
-	if config == nil {
-		config = DefaultConfig()
+// doSingleRequest 执行单次HTTP请求
+func (c *Client) doSingleRequest(ctx ictx.Context, req *Request) (*Response, error) {
+	// 构建完整URL
+	fullURL := req.URL
+	if c.baseURL != "" && !strings.HasPrefix(req.URL, "http") {
+		fullURL = c.baseURL + "/" + strings.TrimPrefix(req.URL, "/")
 	}
 
-	client := &Client{
-		config: config,
-		chain:  NewChain(),
+	// 创建HTTP请求
+	httpReq, err := http.NewRequest(req.Method, fullURL, req.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	client.initHTTPClient()
-	return client
-}
-
-// initHTTPClient 初始化HTTP客户端
-func (c *Client) initHTTPClient() {
-	transport := c.createTransport()
-
-	var jar http.CookieJar
-	if c.config.EnableCookies {
-		jar, _ = cookiejar.New(nil)
-	}
-
-	c.client = &http.Client{
-		Transport:     transport,
-		Jar:           jar,
-		CheckRedirect: c.createRedirectPolicy(),
-	}
-}
-
-// createTransport 创建传输层
-func (c *Client) createTransport() http.RoundTripper {
-	if c.config.Transport != nil {
-		return c.config.Transport
-	}
-
-	transport := &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   c.config.ConnectTimeout,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		MaxIdleConns:        100,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		DisableCompression:  false,
-	}
-
-	if c.config.TLSConfig != nil {
-		transport.TLSClientConfig = c.config.TLSConfig
-	}
-
-	if c.config.Proxy != nil {
-		transport.Proxy = c.config.Proxy
-	}
-
-	return transport
-}
-
-// createRedirectPolicy 创建重定向策略
-func (c *Client) createRedirectPolicy() func(req *http.Request, via []*http.Request) error {
-	if !c.config.FollowRedirects {
-		return func(req *http.Request, via []*http.Request) error {
-			return http.ErrUseLastResponse
+	// 首先设置默认请求头
+	for key, values := range c.defaultHeaders {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
 		}
 	}
-	return nil
-}
 
-// Use 使用中间件
-func (c *Client) Use(middleware Middleware) *Client {
-	c.chain.Add(middleware)
-	return c
-}
-
-// UseFunc 使用中间件函数
-func (c *Client) UseFunc(fn MiddlewareFunc) *Client {
-	c.chain.AddFunc(fn)
-	return c
-}
-
-// Do 执行请求
-func (c *Client) Do(ctx igocontext.IContext, req *Request) (*Response, error) {
-	httpReq, err := c.buildHTTPRequest(ctx, req)
-	if err != nil {
-		return nil, err
+	// 然后设置请求特定的请求头（会覆盖默认的）
+	if req.Header != nil {
+		for key, values := range req.Header {
+			httpReq.Header.Del(key) // 先删除默认的
+			for _, value := range values {
+				httpReq.Header.Add(key, value)
+			}
+		}
+	}
+	
+	// 设置User-Agent（如果没有在header中指定）
+	if c.userAgent != "" && httpReq.Header.Get("User-Agent") == "" {
+		httpReq.Header.Set("User-Agent", c.userAgent)
 	}
 
-	final := func(ctx igocontext.IContext, req *http.Request) (*http.Response, error) {
-		return c.client.Do(req)
-	}
-
-	httpResp, err := c.chain.Execute(ctx, httpReq, final)
-	if err != nil {
-		return nil, err
-	}
-
-	return c.buildResponse(httpResp)
-}
-
-// buildHTTPRequest 构建HTTP请求
-func (c *Client) buildHTTPRequest(ctx igocontext.IContext, req *Request) (*http.Request, error) {
-	body, err := req.buildBody()
-	if err != nil {
-		return nil, err
-	}
-
-	httpReq, err := http.NewRequest(req.Method, req.buildURL(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	// 设置请求头
-	for k, v := range req.Headers {
-		httpReq.Header[k] = v
-	}
-
-	// 设置User-Agent
-	if httpReq.Header.Get("User-Agent") == "" {
-		httpReq.Header.Set("User-Agent", c.config.UserAgent)
-	}
-
-	// 添加trace信息
+	// 自动添加traceId到请求头（这是保留httpclient的核心原因）
 	if ctx != nil {
-		if traceId := getTraceIdCompat(ctx); traceId != "" {
+		if traceId := ctx.GetString("traceId"); traceId != "" {
 			httpReq.Header.Set("X-Trace-ID", traceId)
 		}
 	}
 
-	// 设置超时
-	if req.Timeout > 0 {
-		timeoutCtx, cancel := context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
-		httpReq = httpReq.WithContext(timeoutCtx)
+	// 设置Content-Type（如果没有设置且有body）
+	if req.Body != nil && httpReq.Header.Get("Content-Type") == "" {
+		httpReq.Header.Set("Content-Type", "application/json")
 	}
 
-	return httpReq, nil
-}
+	// 记录请求日志（通过ictx自动带traceId）
+	if ctx != nil && c.debug {
+		ctx.LogInfo("HTTP请求开始",
+			log.String("method", req.Method),
+			log.String("url", fullURL))
+	}
 
-// buildResponse 构建响应
-func (c *Client) buildResponse(httpResp *http.Response) (*Response, error) {
+	// 执行请求
+	httpResp, err := c.client.Do(httpReq)
+	if err != nil {
+		if ctx != nil {
+			ctx.LogError("HTTP请求失败", log.String("error", err.Error()))
+		}
+		return nil, err
+	}
 	defer httpResp.Body.Close()
 
+	// 读取响应体
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	// 记录响应日志（通过ictx自动带traceId）
+	if ctx != nil && c.debug {
+		ctx.LogInfo("HTTP请求完成",
+			log.Int("status", httpResp.StatusCode),
+			log.Int("size", len(body)))
 	}
 
 	return &Response{
@@ -368,115 +287,211 @@ func (c *Client) buildResponse(httpResp *http.Response) (*Response, error) {
 	}, nil
 }
 
-// 便捷方法
+// Get 请求
+func (c *Client) Get(ctx ictx.Context, url string) (*Response, error) {
+	req := &Request{
+		Method: "GET",
+		URL:    url,
+	}
 
-// Get 执行GET请求
-func (c *Client) Get(ctx igocontext.IContext, url string) (*Response, error) {
-	req := NewRequest("GET", url)
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		return c.DoWithRetry(ctx, req)
+	}
 	return c.Do(ctx, req)
 }
 
-// Post 执行POST请求
-func (c *Client) Post(ctx igocontext.IContext, url string, body interface{}) (*Response, error) {
-	req := NewRequest("POST", url).SetBody(body)
+// Post 请求
+func (c *Client) Post(ctx ictx.Context, url string, body interface{}) (*Response, error) {
+	var bodyReader io.Reader
+
+	if body != nil {
+		jsonData, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(jsonData)
+	}
+
+	req := &Request{
+		Method: "POST",
+		URL:    url,
+		Body:   bodyReader,
+	}
+
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		return c.DoWithRetry(ctx, req)
+	}
 	return c.Do(ctx, req)
 }
 
-// Put 执行PUT请求
-func (c *Client) Put(ctx igocontext.IContext, url string, body interface{}) (*Response, error) {
-	req := NewRequest("PUT", url).SetBody(body)
+// Put 请求
+func (c *Client) Put(ctx ictx.Context, url string, body interface{}) (*Response, error) {
+	var bodyReader io.Reader
+
+	if body != nil {
+		jsonData, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		bodyReader = bytes.NewReader(jsonData)
+	}
+
+	req := &Request{
+		Method: "PUT",
+		URL:    url,
+		Body:   bodyReader,
+	}
+
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		return c.DoWithRetry(ctx, req)
+	}
 	return c.Do(ctx, req)
 }
 
-// Delete 执行DELETE请求
-func (c *Client) Delete(ctx igocontext.IContext, url string) (*Response, error) {
-	req := NewRequest("DELETE", url)
+// Delete 请求
+func (c *Client) Delete(ctx ictx.Context, url string) (*Response, error) {
+	req := &Request{
+		Method: "DELETE",
+		URL:    url,
+	}
+
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		return c.DoWithRetry(ctx, req)
+	}
 	return c.Do(ctx, req)
 }
 
-// GetJSON 获取JSON数据
-func (c *Client) GetJSON(ctx igocontext.IContext, url string, target interface{}) error {
+// PostForm 发送表单数据
+func (c *Client) PostForm(ctx ictx.Context, url string, data url.Values) (*Response, error) {
+	req := &Request{
+		Method: "POST",
+		URL:    url,
+		Body:   strings.NewReader(data.Encode()),
+		Header: make(http.Header),
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		return c.DoWithRetry(ctx, req)
+	}
+	return c.Do(ctx, req)
+}
+
+// GetBodyString 获取响应体字符串的便捷方法（支持任何HTTP方法）
+func (c *Client) GetBodyString(ctx ictx.Context, method, url string, body interface{}) (string, error) {
+	var bodyReader io.Reader
+
+	if body != nil {
+		switch v := body.(type) {
+		case string:
+			bodyReader = strings.NewReader(v)
+		case []byte:
+			bodyReader = bytes.NewReader(v)
+		case io.Reader:
+			bodyReader = v
+		default:
+			// 默认序列化为JSON
+			jsonData, err := json.Marshal(body)
+			if err != nil {
+				return "", err
+			}
+			bodyReader = bytes.NewReader(jsonData)
+		}
+	}
+
+	req := &Request{
+		Method: method,
+		URL:    url,
+		Body:   bodyReader,
+	}
+
+	var resp *Response
+	var err error
+
+	// 根据客户端配置决定是否使用重试
+	if c.retryConfig != nil && c.retryConfig.MaxRetries > 0 {
+		resp, err = c.DoWithRetry(ctx, req)
+	} else {
+		resp, err = c.Do(ctx, req)
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.String())
+	}
+
+	return resp.String(), nil
+}
+
+// GetJSON 获取JSON数据的便捷方法
+func (c *Client) GetJSON(ctx ictx.Context, url string, target interface{}) error {
 	resp, err := c.Get(ctx, url)
 	if err != nil {
 		return err
 	}
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.String())
+	}
+
 	return resp.JSON(target)
 }
 
-// PostJSON 发送JSON数据
-func (c *Client) PostJSON(ctx igocontext.IContext, url string, data interface{}, target interface{}) error {
-	req := NewRequest("POST", url).SetJSONBody(data)
-	resp, err := c.Do(ctx, req)
+// PostJSON 发送JSON数据的便捷方法
+func (c *Client) PostJSON(ctx ictx.Context, url string, data interface{}, target interface{}) error {
+	resp, err := c.Post(ctx, url, data)
 	if err != nil {
 		return err
 	}
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.String())
+	}
+
 	if target != nil {
 		return resp.JSON(target)
 	}
 	return nil
 }
 
-// PostForm 发送表单数据
-func (c *Client) PostForm(ctx igocontext.IContext, url string, data url.Values, target interface{}) error {
-	req := NewRequest("POST", url).SetFormBody(data)
-	resp, err := c.Do(ctx, req)
+// calculateBackoff 计算重试等待时间（指数退避）
+func (c *Client) calculateBackoff(attempt int) time.Duration {
+	if c.retryConfig == nil {
+		return 0
+	}
+	
+	// 指数退避算法
+	waitTime := float64(c.retryConfig.InitialWait) * math.Pow(c.retryConfig.BackoffRate, float64(attempt-1))
+	
+	// 限制最大等待时间
+	if time.Duration(waitTime) > c.retryConfig.MaxWait {
+		return c.retryConfig.MaxWait
+	}
+	
+	return time.Duration(waitTime)
+}
+
+// shouldRetry 判断是否应该重试
+func (c *Client) shouldRetry(err error, resp *Response) bool {
+	// 网络错误时重试
 	if err != nil {
-		return err
+		return true
 	}
-	if target != nil {
-		return resp.JSON(target)
+	
+	// 根据HTTP状态码判断是否重试
+	if resp != nil {
+		statusCode := resp.StatusCode
+		// 只重试5xx服务器错误和429限流
+		return statusCode >= 500 || statusCode == 429
 	}
-	return nil
-}
-
-// 链式配置方法
-
-// WithTimeout 设置超时
-func (c *Client) WithTimeout(timeout time.Duration) *Client {
-	c.UseFunc(TimeoutMiddleware(timeout))
-	return c
-}
-
-// WithRetry 设置重试
-func (c *Client) WithRetry(maxRetries int, backoff time.Duration) *Client {
-	c.UseFunc(RetryMiddleware(maxRetries, backoff))
-	return c
-}
-
-// WithLogging 启用日志
-func (c *Client) WithLogging() *Client {
-	c.UseFunc(LoggingMiddleware())
-	return c
-}
-
-// WithHeaders 设置请求头
-func (c *Client) WithHeaders(headers map[string]string) *Client {
-	c.UseFunc(HeaderMiddleware(headers))
-	return c
-}
-
-// WithAuth 设置认证
-func (c *Client) WithAuth(authType, credentials string) *Client {
-	c.UseFunc(AuthMiddleware(authType, credentials))
-	return c
-}
-
-// getTraceIdCompat 兼容 string/[]string 类型的 traceId
-func getTraceIdCompat(ctx igocontext.IContext) string {
-	if ctx == nil {
-		return ""
-	}
-	v, ok := ctx.Get("traceId")
-	if !ok || v == nil {
-		return ""
-	}
-	switch vv := v.(type) {
-	case string:
-		return vv
-	case []string:
-		if len(vv) > 0 {
-			return vv[0]
-		}
-	}
-	return fmt.Sprintf("%v", v)
+	
+	return false
 }

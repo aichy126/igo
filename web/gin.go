@@ -8,8 +8,8 @@ import (
 
 	"github.com/aichy126/igo/config"
 	"github.com/aichy126/igo/log"
-	"github.com/aichy126/igo/trace"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // Web
@@ -41,7 +41,11 @@ func NewWeb(conf *config.Config) (*Web, error) {
 	web.Router.Use(AddTraceId())
 
 	web.initRouters()
-	Wrap(web.Router)
+
+	// 在debug模式下启用pprof性能分析
+	if Debug {
+		WrapPprof(web.Router)
+	}
 
 	//Monitor gin logs
 	ShowAccess := conf.GetBool("local.logger.access")
@@ -72,40 +76,25 @@ func NewWeb(conf *config.Config) (*Web, error) {
 
 func AddTraceId() gin.HandlerFunc {
 	return func(g *gin.Context) {
-		// 从请求头提取追踪信息
-		ctx, err := trace.ExtractFromHTTPRequest(g.Request)
-		if err != nil {
-			// 如果提取失败，创建新的追踪上下文
-			ctx = g.Request.Context()
+		// 优先从请求头获取traceId，支持微服务追踪链
+		var traceID string
+
+		// 尝试从常见的请求头获取traceId
+		if tid := g.GetHeader("X-Trace-ID"); tid != "" {
+			traceID = tid
+		} else if tid := g.GetHeader("X-Trace-Id"); tid != "" {
+			traceID = tid
+		} else if tid := g.GetHeader("traceid"); tid != "" {
+			traceID = tid
+		} else if tid := g.GetHeader("TraceId"); tid != "" {
+			traceID = tid
+		} else {
+			// 如果请求头中没有traceId，生成新的
+			traceID = uuid.New().String()
 		}
 
-		// 开始HTTP请求span
-		spanCtx, span := trace.GlobalTracer.StartSpan(ctx, "HTTP "+g.Request.Method+" "+g.Request.URL.Path,
-			trace.WithAttributes(map[string]string{
-				"http.method":     g.Request.Method,
-				"http.url":        g.Request.URL.String(),
-				"http.user_agent": g.Request.UserAgent(),
-				"http.remote_ip":  g.ClientIP(),
-			}),
-		)
-
-		// 将追踪上下文设置到gin context
-		g.Set("traceContext", spanCtx)
-		g.Set("traceSpan", span)
-
-		// 将traceId设置到gin context以保持向后兼容
-		traceID := trace.GetTraceID(spanCtx)
-		if traceID != "" {
-			g.Set("traceId", string(traceID))
-		}
-
-		// 处理请求
+		g.Set("traceId", traceID)
 		g.Next()
-
-		// 结束span
-		if span != nil {
-			trace.EndSpan(span, nil)
-		}
 	}
 }
 
@@ -143,7 +132,10 @@ func (s *Web) initRouters() {
 }
 
 func (s *Web) Run() error {
-	addr := s.conf.Get("local.address").(string)
+	addr, ok := s.conf.Get("local.address").(string)
+	if !ok {
+		return fmt.Errorf("配置项local.address必须是字符串类型")
+	}
 	s.server = &http.Server{
 		Addr:    addr,
 		Handler: s.Router,

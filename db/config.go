@@ -2,6 +2,7 @@ package db
 
 import (
 	"container/ring"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -58,16 +59,16 @@ func (db *DBResourceManager) Get(name string) *DatabaseManager {
 	return db.resources[name]
 }
 
-func New(conf *viper.Viper) *DBResourceManager {
+func New(conf *viper.Viper) (*DBResourceManager, error) {
 	m := &DBResourceManager{
 		resources: make(map[string]*DatabaseManager),
 	}
 	err := m.initFromToml(conf)
 	if err != nil && reflect.TypeOf(err) != reflect.TypeOf(dbConfigNotFound) {
-		panic(err)
+		return nil, fmt.Errorf("数据库配置初始化失败: %w", err)
 	}
 
-	return m
+	return m, nil
 }
 
 var dbConfigNotFound = errors.New("Db config not found")
@@ -147,7 +148,13 @@ func (db *DatabaseManager) Ping() error {
 	}
 
 	for i := 0; i < db.r.Len(); i++ {
-		engine := db.r.Value.(*xorm.Engine)
+		if db.r == nil || db.r.Value == nil {
+			return errors.New("数据库连接环无效")
+		}
+		engine, ok := db.r.Value.(*xorm.Engine)
+		if !ok {
+			return errors.New("数据库连接类型错误，期望*xorm.Engine")
+		}
 		if err := engine.Ping(); err != nil {
 			return err
 		}

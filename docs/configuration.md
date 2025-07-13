@@ -2,270 +2,173 @@
 
 ## 概述
 
-IGo 使用 Viper 作为配置管理库，支持多种配置源和格式，包括本地文件、环境变量、配置中心等。
+IGo使用Viper作为配置管理库，支持多种配置源和热重载功能。
+
+## 支持的配置源
+
+### 1. 本地文件 (推荐)
+- **格式**: TOML
+- **热重载**: 自动启用，基于fsnotify实时监听
+- **性能**: 几乎无IO开销
+
+### 2. Consul配置中心
+- **热重载**: 用户配置轮询间隔
+- **性能**: 可控的网络请求频率
+- **适用**: 生产环境集中配置管理
+
+### 3. 环境变量
+- **热重载**: 不支持（需重启应用）
+- **适用**: 容器化部署
 
 ## 配置文件格式
 
-IGo 支持 TOML 格式的配置文件，结构清晰，易于阅读和维护。
-
 ### 基本配置
-
 ```toml
 [local]
 address = ":8001"           # 服务监听地址
-debug = true               # 调试模式
-shutdown_timeout = 30      # 优雅关闭超时时间（秒）
+debug = true               # 调试模式（启用pprof）
 
 [local.logger]
 dir = "./logs"             # 日志目录
 name = "log.log"           # 日志文件名
-access = true              # 是否记录访问日志
 level = "INFO"             # 日志级别
+access = true              # 是否记录访问日志
 max_size = 1               # 单个日志文件最大大小（MB）
 max_backups = 5            # 保留的备份文件数量
 max_age = 7                # 日志文件保留天数
 ```
 
-### 数据库配置
-
+### 数据库配置 (可选)
 ```toml
 [mysql.igo]
-max_idle = 10              # 最大空闲连接数
-max_open = 20              # 最大打开连接数
-is_debug = true            # 是否开启调试模式
-data_source = "root:root@tcp(127.0.0.1:3306)/igo?charset=utf8mb4&parseTime=True&loc=Local"
+max_idle = 10
+max_open = 20
+data_source = "root:password@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4"
 
-[sqlite.test]
-data_source = "test.db"    # SQLite 数据库文件路径
+[mysql.other_db]
+max_idle = 5
+max_open = 10
+data_source = "root:password@tcp(127.0.0.1:3306)/other?charset=utf8mb4"
 ```
 
-### Redis 配置
-
+### 缓存配置 (可选)
 ```toml
-[redis.igorediskey]
-address = "127.0.0.1:6379" # Redis 服务器地址
-password = ""              # Redis 密码
-db = 0                     # 数据库编号
-poolsize = 50              # 连接池大小
+[redis.default]
+address = "127.0.0.1:6379"
+password = ""
+db = 0
+pool_size = 10
+
+[redis.session]
+address = "127.0.0.1:6379"
+password = ""
+db = 1
+pool_size = 5
 ```
 
-## 配置源优先级
-
-IGo 按以下优先级读取配置：
-
-1. **命令行参数** - 最高优先级
-2. **环境变量** - 次高优先级
-3. **配置文件** - 默认优先级
-4. **默认值** - 最低优先级
-
-### 命令行参数
-
-```bash
-# 指定配置文件路径
-go run main.go -c config.toml
-
-# 指定配置键值
-go run main.go --local.address=:8080 --local.debug=false
+### Consul配置
+```toml
+[config]
+address = "127.0.0.1:8500"
+key = "igo/config"
 ```
 
-### 环境变量
+## 配置热重载
 
-```bash
-# 指定配置文件路径
-export CONFIG_PATH=./config.toml
+### 文件配置热重载
+```go
+// 文件配置自动启用热重载，无需额外配置
+app, err := igo.NewApp("")
 
-# 指定配置中心
-export CONFIG_ADDRESS=127.0.0.1:8500
-export CONFIG_KEY=/igo/config
+// 添加配置变更回调
+app.AddConfigChangeCallback(func() {
+    // 配置文件变更时执行
+    debug := app.Conf.GetBool("local.debug")
+    log.Info("配置已更新", log.Bool("debug", debug))
+})
+```
 
-# 覆盖特定配置
-export LOCAL_ADDRESS=:8080
-export LOCAL_DEBUG=false
+### Consul配置热重载
+```go
+// 设置Consul配置轮询间隔
+app.SetConfigHotReloadInterval(60) // 60秒轮询一次
+
+// 禁用Consul热重载
+app.SetConfigHotReloadInterval(0)  // 或 -1
+```
+
+### 手动重载配置
+```go
+// 适用于所有配置源
+if err := app.ReloadConfig(); err != nil {
+    log.Error("配置重载失败", log.String("error", err.Error()))
+}
 ```
 
 ## 配置读取
 
-### 使用 util 包
-
+### 基本用法
 ```go
-import "github.com/aichy126/igo/util"
+// 获取配置值
+debug := igo.App.Conf.GetBool("local.debug")
+address := igo.App.Conf.GetString("local.address")
+maxIdle := igo.App.Conf.GetInt("mysql.igo.max_idle")
 
-// 读取字符串配置
-address := util.ConfGetString("local.address")
-
-// 读取整数配置
-port := util.ConfGetInt("local.port")
-
-// 读取布尔配置
-debug := util.ConfGetbool("local.debug")
-
-// 读取浮点数配置
-timeout := util.ConfGetFloat64("local.timeout")
+// 带默认值获取
+timeout := igo.App.Conf.GetIntWithDefault("timeout", 30)
+name := igo.App.Conf.GetStringWithDefault("app.name", "igo")
 ```
 
-### 直接使用 Viper
-
+### 检查配置项是否存在
 ```go
-import "github.com/aichy126/igo"
-
-// 读取配置
-address := igo.App.Conf.GetString("local.address")
-port := igo.App.Conf.GetInt("local.port")
-debug := igo.App.Conf.GetBool("local.debug")
-
-// 读取带默认值的配置
-timeout := igo.App.Conf.GetInt("local.timeout")
-if timeout == 0 {
-    timeout = 30 // 默认值
+if igo.App.Conf.IsSet("mysql.igo") {
+    // 数据库配置存在
+    db := igo.App.DB.NewDBTable("igo", "users")
 }
 ```
 
-### 读取嵌套配置
+## 性能影响
 
-```go
-// 读取日志配置
-logDir := util.ConfGetString("local.logger.dir")
-logLevel := util.ConfGetString("local.logger.level")
+### 不同配置源的性能特点
+- **文件监听**: 基于操作系统inotify机制，几乎无IO开销
+- **Consul轮询**: 用户自定义间隔，推荐30-300秒
+- **手动重载**: 仅在API调用时执行，无持续开销
 
-// 读取数据库配置
-dbMaxIdle := util.ConfGetInt("mysql.igo.max_idle")
-dbMaxOpen := util.ConfGetInt("mysql.igo.max_open")
-```
+### 使用建议
+- **开发环境**: 文件配置，自动热重载
+- **测试环境**: Consul配置，短间隔轮询（30-60秒）
+- **生产环境**: Consul配置，长间隔轮询（300秒）或禁用热重载
 
 ## 配置验证
 
-### 基本验证
+IGo只验证最基本的必需配置项：
 
 ```go
-func validateConfig() error {
-    // 检查必需配置
-    if util.ConfGetString("local.address") == "" {
-        return errors.New("local.address is required")
-    }
-
-    // 检查配置范围
-    port := util.ConfGetInt("local.port")
-    if port < 1 || port > 65535 {
-        return errors.New("local.port must be between 1 and 65535")
-    }
-
-    return nil
+// 必需配置项
+if !conf.IsSet("local.address") {
+    return fmt.Errorf("缺少必要的配置项: local.address")
 }
 ```
 
-### 配置热重载
+业务相关的配置验证由业务层自行实现。
 
-```go
-// 监听配置文件变化
-igo.App.Conf.WatchConfig()
-igo.App.Conf.OnConfigChange(func(e fsnotify.Event) {
-    log.Info("配置文件已更新", log.String("file", e.Name))
-    // 重新加载配置
-    reloadConfig()
-})
-```
+## 环境变量
 
-## 配置中心支持
-
-### Consul 配置中心
-
-```toml
-[config]
-address = "127.0.0.1:8500"  # Consul 地址
-key = "/igo/config"         # 配置键
-```
-
-### 环境变量配置
+支持通过环境变量指定配置文件路径和Consul配置：
 
 ```bash
-export CONFIG_ADDRESS=127.0.0.1:8500
-export CONFIG_KEY=/igo/config
+# 配置文件路径
+export CONFIG_PATH="/path/to/config.toml"
+
+# Consul配置
+export CONFIG_ADDRESS="127.0.0.1:8500"
+export CONFIG_KEY="igo/config"
 ```
 
 ## 最佳实践
 
-### 1. 配置文件组织
-
-- 将不同环境的配置文件分开
-- 使用有意义的配置键名
-- 为配置项添加注释说明
-
-### 2. 配置验证
-
-- 在应用启动时验证必需配置
-- 检查配置值的合理性
-- 提供有意义的错误信息
-
-### 3. 环境变量
-
-- 敏感信息使用环境变量
-- 使用标准的环境变量命名
-- 提供环境变量文档
-
-### 4. 配置热重载
-
-- 只重载支持热更新的配置
-- 记录配置变更日志
-- 处理配置重载错误
-
-## 示例配置
-
-### 开发环境
-
-```toml
-[local]
-address = ":8001"
-debug = true
-shutdown_timeout = 30
-
-[local.logger]
-dir = "./logs"
-name = "dev.log"
-access = true
-level = "DEBUG"
-max_size = 1
-max_backups = 3
-max_age = 3
-
-[mysql.igo]
-max_idle = 5
-max_open = 10
-is_debug = true
-data_source = "root:root@tcp(127.0.0.1:3306)/igo_dev?charset=utf8mb4&parseTime=True&loc=Local"
-
-[redis.igorediskey]
-address = "127.0.0.1:6379"
-password = ""
-db = 0
-poolsize = 20
-```
-
-### 生产环境
-
-```toml
-[local]
-address = ":8080"
-debug = false
-shutdown_timeout = 60
-
-[local.logger]
-dir = "/var/log/igo"
-name = "app.log"
-access = true
-level = "INFO"
-max_size = 100
-max_backups = 10
-max_age = 30
-
-[mysql.igo]
-max_idle = 20
-max_open = 100
-is_debug = false
-data_source = "user:pass@tcp(db.example.com:3306)/igo_prod?charset=utf8mb4&parseTime=True&loc=Local"
-
-[redis.igorediskey]
-address = "redis.example.com:6379"
-password = "your_redis_password"
-db = 0
-poolsize = 100
-```
+1. **配置分层**: 区分基础配置和业务配置
+2. **默认值**: 为可选配置提供合理默认值
+3. **环境隔离**: 不同环境使用不同配置文件
+4. **热重载谨慎使用**: 生产环境建议较长轮询间隔或禁用
+5. **配置变更回调**: 在回调中重新初始化相关组件
