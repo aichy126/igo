@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 
 	"github.com/go-redis/redis/v8"
 

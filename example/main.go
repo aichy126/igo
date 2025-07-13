@@ -6,7 +6,7 @@ import (
 
 	"github.com/aichy126/igo"
 	"github.com/aichy126/igo/ictx"
-	ilog "github.com/aichy126/igo/log"
+	ilog "github.com/aichy126/igo/ilog"
 	"github.com/gin-gonic/gin"
 )
 

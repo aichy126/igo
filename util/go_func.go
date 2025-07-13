@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 )
 
 // 用法 通常此函数放在defer 之后 ，形如: defer Recover()

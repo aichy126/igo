@@ -56,7 +56,7 @@ package main
 import (
     "log"
     "github.com/aichy126/igo"
-    ilog "github.com/aichy126/igo/log"
+    ilog "github.com/aichy126/igo/ilog"
 )
 
 func main() {
@@ -82,14 +82,7 @@ func main() {
     // 设置路由
     setupRoutes(igo.App.Web.Router)
 
-    // 启动Web服务器（在goroutine中）
-    go func() {
-        if err := igo.App.Web.Run(); err != nil {
-            ilog.Error("Web服务器启动失败", ilog.Any("error", err))
-        }
-    }()
-
-    // 运行生命周期管理器（等待信号）
+    // 运行应用（自动启动Web服务器并处理优雅关闭）
     if err := igo.App.Run(); err != nil {
         ilog.Error("应用运行失败", ilog.Any("error", err))
     }
