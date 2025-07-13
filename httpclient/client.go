@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/aichy126/igo/ictx"
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 )
 
 // RetryConfig 重试配置

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 
 	"github.com/aichy126/igo/config"
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 	_ "github.com/go-sql-driver/mysql"
 	"xorm.io/xorm"
 )

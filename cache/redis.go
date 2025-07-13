@@ -5,7 +5,7 @@ import (
 	"sync"
 
 	"github.com/aichy126/igo/config"
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 )
 
 type RedisManager struct {

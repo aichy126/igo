@@ -15,7 +15,7 @@
 |------|------|------|
 | **应用生命周期** | 优雅启动/关闭、钩子管理、信号处理 | ✅ 核心功能 |
 | **配置热重载** | 文件实时监听、Consul轮询、手动重载 | ✅ 核心功能 |
-| **分布式追踪** | traceId自动传递、日志关联、链路追踪 | ✅ 核心功能 |
+| **分布式追踪** | traceId自动传递、日志关联、上下文传递 | ✅ 核心功能 |
 | **HTTP客户端** | 链式配置、自动重试、header管理、trace传递 | ✅ 核心功能 |
 | **Web框架** | 基于Gin、中间件、pprof集成 | ✅ 核心功能 |
 | **日志系统** | 结构化日志、trace集成、文件轮转 | ✅ 核心功能 |
@@ -40,7 +40,7 @@ import (
 
 	"github.com/aichy126/igo"
 	"github.com/aichy126/igo/ictx"
-	ilog "github.com/aichy126/igo/log"
+	ilog "github.com/aichy126/igo/ilog"
 	"github.com/gin-gonic/gin"
 )
 
@@ -188,15 +188,26 @@ content, err := client.GetBodyString(ctx, "GET", "/page.html", nil)
 ### 4. 分布式追踪
 
 ```go
+import (
+	"github.com/aichy126/igo/ictx"
+	ilog "github.com/aichy126/igo/ilog"
+	"github.com/gin-gonic/gin"
+)
+
 func Handler(c *gin.Context) {
 	ctx := ictx.Ginform(c)
 	
 	// 自动带traceId的日志
 	ctx.LogInfo("处理开始")
 	
-	// 业务span追踪
-	span := ctx.StartBusinessSpan("user_operation")
-	defer span.End()
+	// 设置业务数据
+	ctx.Set("user_id", "12345")
+	ctx.Set("operation", "user_login")
+	
+	// 记录业务日志（自动包含traceId）
+	ctx.LogInfo("用户登录处理", 
+		ilog.String("user_id", ctx.GetString("user_id")),
+		ilog.String("operation", ctx.GetString("operation")))
 	
 	// HTTP调用自动传递traceId
 	client.Get(ctx, "/external-api")

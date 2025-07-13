@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/mapstructure"
 	"github.com/pkg/errors"

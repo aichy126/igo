@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 )
 
 // LifecycleManager 应用生命周期管理器

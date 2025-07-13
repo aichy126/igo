@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/aichy126/igo/config"
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/ilog"
 	"github.com/gin-gonic/gin"
 )
 
