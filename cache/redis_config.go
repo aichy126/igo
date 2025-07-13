@@ -32,8 +32,7 @@ func (rc *redisConfig) parse(conf *redisConfig) error {
 	rc.DB = conf.DB
 	rc.PoolSize = conf.PoolSize
 	if !strings.Contains(rc.Address, ":") {
-		log.Error("redisconfig.address doesn't contains port", log.Any("rc.Address", rc.Address))
-
+		log.Warn("Redis地址缺少端口号，自动添加默认端口6379", log.Any("address", rc.Address))
 		rc.Address = rc.Address + ":6379"
 	}
 	return nil

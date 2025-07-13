@@ -17,7 +17,10 @@ type DB struct {
 // NewDb
 func NewDb(conf *config.Config) (*DB, error) {
 	db := new(DB)
-	manager := New(conf.Viper)
+	manager, err := New(conf.Viper)
+	if err != nil {
+		return nil, err
+	}
 	db.DBResourceManager = manager
 	return db, nil
 }
@@ -127,4 +130,12 @@ func (repo *Repo) Exec(sql string, args ...interface{}) (sql.Result, error) {
 
 func (repo *Repo) ShowSQL(b bool) {
 	repo.Engine.ShowSQL(b)
+}
+
+// Close 关闭所有数据库连接
+func (s *DB) Close() error {
+	if s.DBResourceManager != nil {
+		return s.DBResourceManager.Close()
+	}
+	return nil
 }

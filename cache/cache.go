@@ -60,3 +60,11 @@ func (this *Redis) MarshalJSON() ([]byte, error) {
 func (r *Redis) GetClient() *redis.Client {
 	return r.Client
 }
+
+// Close 关闭所有Redis连接
+func (c *Cache) Close() error {
+	if c.RedisManager != nil {
+		return c.RedisManager.Close()
+	}
+	return nil
+}

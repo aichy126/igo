@@ -7,17 +7,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Wrap adds several routes from package `net/http/pprof` to *gin.Engine object
-func Wrap(router *gin.Engine) {
-	WrapGroup(&router.RouterGroup)
+// WrapPprof 添加pprof路由到gin引擎（简化版本）
+func WrapPprof(router *gin.Engine) {
+	WrapPprofGroup(&router.RouterGroup)
 }
 
-// Wrapper make sure we are backward compatible
-var Wrapper = Wrap
-
-// WrapGroup adds several routes from package `net/http/pprof` to *gin.RouterGroup object
-func WrapGroup(router *gin.RouterGroup) {
-	routers := []struct {
+// WrapPprofGroup 添加pprof路由到gin路由组
+func WrapPprofGroup(router *gin.RouterGroup) {
+	// pprof路由配置
+	pprofRoutes := []struct {
 		Method  string
 		Path    string
 		Handler gin.HandlerFunc
@@ -35,9 +33,9 @@ func WrapGroup(router *gin.RouterGroup) {
 		{"GET", "/debug/pprof/mutex", MutexHandler()},
 	}
 
+	// 计算路径前缀
 	basePath := strings.TrimSuffix(router.BasePath(), "/")
 	var prefix string
-
 	switch {
 	case basePath == "":
 		prefix = ""
@@ -47,77 +45,78 @@ func WrapGroup(router *gin.RouterGroup) {
 		prefix = "/debug/pprof"
 	}
 
-	for _, r := range routers {
-		router.Handle(r.Method, strings.TrimPrefix(r.Path, prefix), r.Handler)
+	// 注册路由
+	for _, route := range pprofRoutes {
+		router.Handle(route.Method, strings.TrimPrefix(route.Path, prefix), route.Handler)
 	}
 }
 
-// IndexHandler will pass the call from /debug/pprof to pprof
+// IndexHandler pprof首页处理器
 func IndexHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Index(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Index(c.Writer, c.Request)
 	}
 }
 
-// HeapHandler will pass the call from /debug/pprof/heap to pprof
+// HeapHandler 堆内存分析处理器
 func HeapHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Handler("heap").ServeHTTP(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Handler("heap").ServeHTTP(c.Writer, c.Request)
 	}
 }
 
-// GoroutineHandler will pass the call from /debug/pprof/goroutine to pprof
+// GoroutineHandler goroutine分析处理器
 func GoroutineHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Handler("goroutine").ServeHTTP(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Handler("goroutine").ServeHTTP(c.Writer, c.Request)
 	}
 }
 
-// BlockHandler will pass the call from /debug/pprof/block to pprof
+// BlockHandler 阻塞分析处理器
 func BlockHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Handler("block").ServeHTTP(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Handler("block").ServeHTTP(c.Writer, c.Request)
 	}
 }
 
-// ThreadCreateHandler will pass the call from /debug/pprof/threadcreate to pprof
+// ThreadCreateHandler 线程创建分析处理器
 func ThreadCreateHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Handler("threadcreate").ServeHTTP(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Handler("threadcreate").ServeHTTP(c.Writer, c.Request)
 	}
 }
 
-// CmdlineHandler will pass the call from /debug/pprof/cmdline to pprof
+// CmdlineHandler 命令行处理器
 func CmdlineHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Cmdline(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Cmdline(c.Writer, c.Request)
 	}
 }
 
-// ProfileHandler will pass the call from /debug/pprof/profile to pprof
+// ProfileHandler CPU分析处理器
 func ProfileHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Profile(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Profile(c.Writer, c.Request)
 	}
 }
 
-// SymbolHandler will pass the call from /debug/pprof/symbol to pprof
+// SymbolHandler 符号表处理器
 func SymbolHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Symbol(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Symbol(c.Writer, c.Request)
 	}
 }
 
-// TraceHandler will pass the call from /debug/pprof/trace to pprof
+// TraceHandler 执行跟踪处理器
 func TraceHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Trace(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Trace(c.Writer, c.Request)
 	}
 }
 
-// MutexHandler will pass the call from /debug/pprof/mutex to pprof
+// MutexHandler 互斥锁分析处理器
 func MutexHandler() gin.HandlerFunc {
-	return func(ctx *gin.Context) {
-		pprof.Handler("mutex").ServeHTTP(ctx.Writer, ctx.Request)
+	return func(c *gin.Context) {
+		pprof.Handler("mutex").ServeHTTP(c.Writer, c.Request)
 	}
 }

@@ -49,8 +49,17 @@ func (l *Logger) Fatal(msg string, fields ...Field) {
 func CtxInfo(msg string, fields ...Field) {
 	std.l.WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
 }
+
 func CtxError(msg string, fields ...Field) {
 	std.l.WithOptions(zap.AddCallerSkip(1)).Error(msg, fields...)
+}
+
+func CtxWarn(msg string, fields ...Field) {
+	std.l.WithOptions(zap.AddCallerSkip(1)).Warn(msg, fields...)
+}
+
+func CtxDebug(msg string, fields ...Field) {
+	std.l.WithOptions(zap.AddCallerSkip(1)).Debug(msg, fields...)
 }
 
 var (
