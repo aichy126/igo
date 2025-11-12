@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -15,6 +16,7 @@ import (
 type Web struct {
 	Router *gin.Engine
 	conf   *config.Config
+	server *http.Server
 }
 
 // NewWeb
@@ -90,6 +92,21 @@ func (s *Web) initRouters() {
 	})
 }
 
-func (s *Web) Run() {
-	s.Router.Run(s.conf.Get("local.address").(string))
+func (s *Web) Run() error {
+	address := s.conf.Get("local.address").(string)
+	s.server = &http.Server{
+		Addr:    address,
+		Handler: s.Router,
+	}
+	log.Info("Web服务器启动", log.Any("address", address))
+	return s.server.ListenAndServe()
+}
+
+// Shutdown 优雅关闭Web服务器
+func (s *Web) Shutdown(ctx context.Context) error {
+	if s.server != nil {
+		log.Info("正在关闭Web服务器...")
+		return s.server.Shutdown(ctx)
+	}
+	return nil
 }

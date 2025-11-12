@@ -72,3 +72,18 @@ func (rm *RedisManager) newRedis(config redisConfig) (*Redis, error) {
 	}
 	return config.newRedis()
 }
+
+// Close 关闭所有Redis连接
+func (rm *RedisManager) Close() error {
+	rm.mutex.Lock()
+	defer rm.mutex.Unlock()
+
+	for name, r := range rm.resources {
+		if r != nil && r.Client != nil {
+			if err := r.Client.Close(); err != nil {
+				log.Error("关闭Redis连接失败", log.Any("name", name), log.Any("error", err))
+			}
+		}
+	}
+	return nil
+}

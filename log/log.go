@@ -94,16 +94,19 @@ func InitLogger(filename, level string, maxSize, maxBackups, maxAge int, debug b
 	if err != nil {
 		return
 	}
-	var core zapcore.Core
+	var baseCore zapcore.Core
 	if debug {
 		//输出到日志和控制台
-		core = zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(writeSyncer, zapcore.AddSync(os.Stdout)), l)
+		baseCore = zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(writeSyncer, zapcore.AddSync(os.Stdout)), l)
 	} else {
 		//只输出到日志
-		core = zapcore.NewCore(encoder, writeSyncer, l)
+		baseCore = zapcore.NewCore(encoder, writeSyncer, l)
 	}
 
-	lg = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+	// 包装为hookCore，支持日志钩子
+	hookCoreInstance = newHookCore(baseCore)
+
+	lg = zap.New(hookCoreInstance, zap.AddCaller(), zap.AddCallerSkip(1))
 	zap.ReplaceGlobals(lg) // 替换zap包中全局的logger实例，后续在其他包中只需使用zap.L()调用即可
 	logger := &Logger{
 		l:     lg,
