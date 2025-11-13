@@ -103,6 +103,9 @@ func NewApp(ConfigPath string) (*Application, error) {
 		})
 	}
 
+	// 设置全局应用实例
+	App = a
+
 	return a, nil
 }
 
