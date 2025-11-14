@@ -57,12 +57,10 @@ func (lm *LifecycleManager) Run() error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-
-	log.Info("收到关闭信号，开始执行关闭钩子...")
-
+	fmt.Printf("\nClose App... \n")
 	// 执行关闭钩子
 	if err := lm.executeShutdownHooks(); err != nil {
-		log.Error("关闭钩子执行失败", log.Any("error", err))
+		log.Error("close app error", log.Any("error", err))
 		return err
 	}
 
@@ -107,7 +105,6 @@ func (lm *LifecycleManager) executeShutdownHooks() error {
 	// 反向执行关闭钩子
 	for i := len(lm.shutdownHooks) - 1; i >= 0; i-- {
 		hook := lm.shutdownHooks[i]
-		log.Info("执行关闭钩子", log.Any("index", i))
 		if err := hook(); err != nil {
 			log.Error("关闭钩子执行失败", log.Any("index", i), log.Any("error", err))
 		}

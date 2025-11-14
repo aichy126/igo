@@ -98,14 +98,13 @@ func (s *Web) Run() error {
 		Addr:    address,
 		Handler: s.Router,
 	}
-	log.Info("Web服务器启动", log.Any("address", address))
+	fmt.Printf("Gin Address:%s\n", address)
 	return s.server.ListenAndServe()
 }
 
 // Shutdown 优雅关闭Web服务器
 func (s *Web) Shutdown(ctx context.Context) error {
 	if s.server != nil {
-		log.Info("正在关闭Web服务器...")
 		return s.server.Shutdown(ctx)
 	}
 	return nil

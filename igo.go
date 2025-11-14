@@ -83,14 +83,14 @@ func NewApp(ConfigPath string) (*Application, error) {
 	// 自动注册所有组件的优雅关闭（按依赖关系反向顺序）
 	// 1. 首先关闭Web服务器（停止接收新请求）
 	a.lifecycle.AddShutdownHook(func() error {
-		log.Info("正在关闭Web服务器...")
+		// log.Info("正在关闭Web服务器...")
 		return a.Web.Shutdown(context.Background())
 	})
 
 	// 2. 然后关闭缓存连接（如果存在）
 	if a.Cache != nil && a.Cache.RedisManager != nil {
 		a.lifecycle.AddShutdownHook(func() error {
-			log.Info("正在关闭缓存连接...")
+			// log.Info("正在关闭缓存连接...")
 			return a.Cache.Close()
 		})
 	}
@@ -98,7 +98,7 @@ func NewApp(ConfigPath string) (*Application, error) {
 	// 3. 最后关闭数据库连接（如果存在）
 	if a.DB != nil && a.DB.DBResourceManager != nil {
 		a.lifecycle.AddShutdownHook(func() error {
-			log.Info("正在关闭数据库连接...")
+			// log.Info("正在关闭数据库连接...")
 			return a.DB.Close()
 		})
 	}
