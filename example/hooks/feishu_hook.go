@@ -59,7 +59,7 @@ func (h *FeishuHook) Fire(entry *log.LogEntry) error {
 }
 
 // buildFeishuCard 构建飞书卡片消息
-func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]interface{} {
+func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]any {
 	appName := h.AppName
 	if appName == "" {
 		appName = "IGo应用"
@@ -74,15 +74,15 @@ func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]interface{}
 	}
 
 	// 构建字段列表
-	elements := []interface{}{
-		map[string]interface{}{
+	elements := []any{
+		map[string]any{
 			"tag": "div",
 			"text": map[string]string{
 				"content": fmt.Sprintf("**消息**: %s", entry.Message),
 				"tag":     "lark_md",
 			},
 		},
-		map[string]interface{}{
+		map[string]any{
 			"tag": "div",
 			"text": map[string]string{
 				"content": fmt.Sprintf("**时间**: %s", entry.Timestamp.Format("2006-01-02 15:04:05")),
@@ -93,7 +93,7 @@ func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]interface{}
 
 	// 如果有 TraceID，添加到消息中
 	if entry.TraceID != "" {
-		elements = append(elements, map[string]interface{}{
+		elements = append(elements, map[string]any{
 			"tag": "div",
 			"text": map[string]string{
 				"content": fmt.Sprintf("**TraceID**: %s", entry.TraceID),
@@ -111,7 +111,7 @@ func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]interface{}
 			}
 		}
 		if fieldsStr != "" {
-			elements = append(elements, map[string]interface{}{
+			elements = append(elements, map[string]any{
 				"tag": "div",
 				"text": map[string]string{
 					"content": fmt.Sprintf("**详细信息**:\n%s", fieldsStr),
@@ -121,10 +121,10 @@ func (h *FeishuHook) buildFeishuCard(entry *log.LogEntry) map[string]interface{}
 		}
 	}
 
-	return map[string]interface{}{
+	return map[string]any{
 		"msg_type": "interactive",
-		"card": map[string]interface{}{
-			"header": map[string]interface{}{
+		"card": map[string]any{
+			"header": map[string]any{
 				"title": map[string]string{
 					"content": fmt.Sprintf("%s [%s] %s", emoji, appName, entry.Level.String()),
 					"tag":     "plain_text",

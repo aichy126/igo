@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -31,46 +32,43 @@ func NewWeb(conf *config.Config) (*Web, error) {
 	} else {
 		gin.SetMode(gin.ReleaseMode)
 	}
-	web.Router = gin.Default()
-	web.initRouters()
+
+	// 用 gin.New() 替代 gin.Default(),自行组装中间件:
+	// recovery 始终开启(panic 记录到 zap 日志),避免 gin 默认 logger 与 access 日志双写
+	web.Router = gin.New()
 	web.Router.Use(AddTraceId())
+	web.Router.Use(log.RecoveryWithZap(true))
+	if Debug {
+		// debug 模式下保留 gin 控制台请求日志,方便本地开发
+		web.Router.Use(gin.Logger())
+	}
+	web.initRouters()
 
 	Wrap(web.Router)
 
 	//Monitor gin logs
 	ShowAccess := conf.GetBool("local.logger.access")
 	if ShowAccess {
-		AccessFilename := fmt.Sprintf("%s/access.log", conf.GetString("local.logger.dir"))
-		Level := conf.GetString("local.logger.level")
-		MaxSize := conf.GetInt("local.logger.max_size")
-		MaxSizeInt := 1 //Maximum size unit saved per log file: MB
-		if MaxSize > 0 {
-			MaxSizeInt = MaxSize
-		}
-		MaxBackups := conf.GetInt("local.logger.max_backups")
-		MaxBackupsInt := 5 //The maximum number of days a file can be saved
-		if MaxBackups > 0 {
-			MaxBackupsInt = MaxBackups
-		}
-		MaxAge := conf.GetInt("local.logger.max_age")
-		MaxAgeInt := 7 //The maximum number of backups saved by the log file
-		if MaxAge > 0 {
-			MaxAgeInt = MaxAge
-		}
-		accesslogger := log.InitAccessLogger(AccessFilename, Level, MaxSizeInt, MaxBackupsInt, MaxAgeInt)
+		accesslogger := log.NewAccessLogger(conf)
 		web.Router.Use(log.Ginzap(accesslogger, time.RFC3339, true))
-		web.Router.Use(log.RecoveryWithZap(true))
 	}
 	return web, nil
 }
 
+const TraceIdHeader = "X-Trace-Id"
+
+// AddTraceId 为每个请求生成/透传 traceId,并写回响应头方便排查问题
 func AddTraceId() gin.HandlerFunc {
 	return func(g *gin.Context) {
 		traceId := g.GetHeader("traceId")
 		if traceId == "" {
+			traceId = g.GetHeader(TraceIdHeader)
+		}
+		if traceId == "" {
 			traceId = uuid.New().String()
 		}
 		g.Set("traceId", traceId)
+		g.Header(TraceIdHeader, traceId)
 		g.Next()
 	}
 }
@@ -83,8 +81,7 @@ func (s *Web) initRouters() {
 			Handler string `json:"handler"`
 			Method  string `json:"method"`
 		}
-		type routerList []routerInfo
-		routerArr := make(routerList, 0)
+		routerArr := make([]routerInfo, 0)
 		for _, r := range routes {
 			routerArr = append(routerArr, routerInfo{Path: r.Path, Handler: r.Handler, Method: r.Method})
 		}
@@ -92,14 +89,24 @@ func (s *Web) initRouters() {
 	})
 }
 
+// Run 启动 HTTP 服务(阻塞)
+// 正常优雅关闭时返回 nil;启动失败(如端口被占用)返回错误
 func (s *Web) Run() error {
-	address := s.conf.Get("local.address").(string)
+	address := s.conf.GetString("local.address")
+	if address == "" {
+		return fmt.Errorf("缺少配置项 local.address")
+	}
 	s.server = &http.Server{
 		Addr:    address,
 		Handler: s.Router,
 	}
 	fmt.Printf("Gin Address:%s\n", address)
-	return s.server.ListenAndServe()
+	err := s.server.ListenAndServe()
+	if errors.Is(err, http.ErrServerClosed) {
+		// 优雅关闭触发的正常返回,不算错误
+		return nil
+	}
+	return err
 }
 
 // Shutdown 优雅关闭Web服务器

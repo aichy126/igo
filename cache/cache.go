@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aichy126/igo/config"
-	"github.com/go-redis/redis/v8"
+	"github.com/redis/go-redis/v9"
 )
 
 // Cache
@@ -12,10 +12,15 @@ type Cache struct {
 	*RedisManager
 }
 
-// NewCache
+// NewCache 从配置初始化缓存
+// 配置了的 redis 连接失败会返回错误(fail-fast);完全没配置 redis 时返回可用的空实例
 func NewCache(conf *config.Config) (*Cache, error) {
 	cache := new(Cache)
-	cache.RedisManager = NewRedisManager(conf)
+	manager, err := NewRedisManager(conf)
+	if err != nil {
+		return nil, err
+	}
+	cache.RedisManager = manager
 	return cache, nil
 }
 

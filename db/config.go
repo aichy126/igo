@@ -1,8 +1,7 @@
 package db
 
 import (
-	"container/ring"
-	"reflect"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -10,7 +9,6 @@ import (
 	"github.com/aichy126/igo/log"
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/mapstructure"
-	"github.com/pkg/errors"
 	"github.com/spf13/viper"
 	"xorm.io/xorm"
 )
@@ -31,8 +29,7 @@ type DBConfig struct {
 func (db DBConfig) newDB() (engine *xorm.Engine, err error) {
 	orm, err := xorm.NewEngine(db.DbType, db.Datasource)
 	if err != nil {
-		err = errors.Wrap(err, "conn xorm db error ")
-		return
+		return nil, fmt.Errorf("创建 xorm engine 失败: %w", err)
 	}
 
 	orm.DatabaseTZ = time.Local
@@ -58,25 +55,46 @@ func (db *DBResourceManager) Get(name string) *DatabaseManager {
 	return db.resources[name]
 }
 
-func New(conf *viper.Viper) *DBResourceManager {
+// Names 返回所有已初始化的数据库配置名
+func (db *DBResourceManager) Names() []string {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
+	names := make([]string, 0, len(db.resources))
+	for name := range db.resources {
+		names = append(names, name)
+	}
+	return names
+}
+
+// PingAll 对所有数据库执行 Ping,返回每个库的结果(nil 表示正常)
+func (db *DBResourceManager) PingAll() map[string]error {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
+	result := make(map[string]error, len(db.resources))
+	for name, dm := range db.resources {
+		result[name] = dm.Ping()
+	}
+	return result
+}
+
+// New 从配置初始化所有数据库连接
+// 配置了的数据库必须初始化并 Ping 成功,否则返回错误(fail-fast);
+// 完全没有 [mysql]/[sqlite] 配置时返回空 manager,不报错。
+func New(conf *viper.Viper) (*DBResourceManager, error) {
 	m := &DBResourceManager{
 		resources: make(map[string]*DatabaseManager),
 	}
-	err := m.initFromToml(conf)
-	if err != nil && reflect.TypeOf(err) != reflect.TypeOf(dbConfigNotFound) {
-		panic(err)
+	if err := m.initFromToml(conf); err != nil {
+		return nil, err
 	}
-
-	return m
+	return m, nil
 }
-
-var dbConfigNotFound = errors.New("Db config not found")
 
 func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 
-	mysqlList := make(map[string]*DBConfig, 0)
+	dbConfigList := make(map[string]*DBConfig)
 	mysqlConfigList := conf.GetStringMap("mysql")
 	sqliteConfigList := conf.GetStringMap("sqlite")
 
@@ -84,35 +102,34 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 		data := new(DBConfig)
 		err := mapstructure.Decode(v, data)
 		if err != nil {
-			continue
+			return fmt.Errorf("mysql 配置 [mysql.%s] 解析失败: %w", k, err)
 		}
 		data.DbType = "mysql"
-		mysqlList[k] = data
+		dbConfigList[k] = data
 	}
 
 	for k, v := range sqliteConfigList {
 		data := new(DBConfig)
 		err := mapstructure.Decode(v, data)
 		if err != nil {
-			continue
+			return fmt.Errorf("sqlite 配置 [sqlite.%s] 解析失败: %w", k, err)
 		}
 		data.DbType = "sqlite3"
-		mysqlList[k] = data
+		dbConfigList[k] = data
 	}
 
-	for name, itemDBConfig := range mysqlList {
-		dm := new(DatabaseManager)
-		err := dm.initWriterDb(itemDBConfig)
-		if err != nil {
-			return err
+	for name, itemDBConfig := range dbConfigList {
+		if strings.TrimSpace(itemDBConfig.Datasource) == "" {
+			return fmt.Errorf("数据库 [%s] 缺少 data_source 配置", name)
 		}
-		err = dm.Ping()
-		if err != nil {
-			log.Error("mysql ping error", log.Any("config_name", name), log.Any("error", err))
-			continue
+		dm := new(DatabaseManager)
+		if err := dm.initWriterDb(itemDBConfig); err != nil {
+			return fmt.Errorf("数据库 [%s] 初始化失败: %w", name, err)
+		}
+		if err := dm.Ping(); err != nil {
+			return fmt.Errorf("数据库 [%s] 连接失败(ping): %w", name, err)
 		}
 		db.resources[name] = dm
-		continue
 	}
 	return nil
 }
@@ -120,41 +137,25 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 // DatabaseManager
 type DatabaseManager struct {
 	datasource string
-	r          *ring.Ring
 	WriteDB    *xorm.Engine
 }
 
 func (db *DatabaseManager) initWriterDb(conf *DBConfig) (err error) {
-	var rc DBConfig
-	rc = *conf
+	rc := *conf
 	db.WriteDB, err = rc.newDB()
 	if err != nil {
 		return
 	}
-	//db.datasource = rc.Datasource
 	db.datasource = strings.TrimSpace(rc.Datasource)
 	return
 }
 
 // Ping Database
 func (db *DatabaseManager) Ping() error {
-	if db == nil {
-		return errors.New("invalid database config")
+	if db == nil || db.WriteDB == nil {
+		return fmt.Errorf("invalid database config")
 	}
-	err := db.WriteDB.Ping()
-	if err != nil {
-		return err
-	}
-
-	for i := 0; i < db.r.Len(); i++ {
-		engine := db.r.Value.(*xorm.Engine)
-		if err := engine.Ping(); err != nil {
-			return err
-		}
-		db.r = db.r.Next()
-	}
-
-	return nil
+	return db.WriteDB.Ping()
 }
 
 // Close 关闭所有数据库连接

@@ -67,7 +67,7 @@ func (b *HttpRequest) reset() {
 	if len(b.files) > 0 {
 		b.files = nil
 	}
-	b.setting = getDefaultSetting()
+	b.setting = HttpSettings{httpSettingsData: getDefaultSetting()}
 	b.dump = nil
 	b.retries = 0
 	b.username = ""
@@ -248,7 +248,7 @@ func (b *HttpRequest) PostFile(formname, filename string) *HttpRequest {
 
 // Body adds request raw body.
 // it supports string and []byte.
-func (b *HttpRequest) Body(data interface{}) *HttpRequest {
+func (b *HttpRequest) Body(data any) *HttpRequest {
 	switch t := data.(type) {
 	case string:
 		b.body = bytes.NewReader([]byte(t))
@@ -279,7 +279,7 @@ func (b *HttpRequest) Body(data interface{}) *HttpRequest {
 }
 
 // XMLBody adds request raw body encoding by XML.
-func (b *HttpRequest) XMLBody(obj interface{}) *HttpRequest {
+func (b *HttpRequest) XMLBody(obj any) *HttpRequest {
 	b.HeaderNX("Content-Type", "application/xml; charset=utf-8")
 	switch t := obj.(type) {
 	case string:
@@ -306,7 +306,7 @@ func (b *HttpRequest) XMLBody(obj interface{}) *HttpRequest {
 }
 
 // JSONBody adds request raw body encoding by JSON.
-func (b *HttpRequest) JSONBody(obj interface{}) *HttpRequest {
+func (b *HttpRequest) JSONBody(obj any) *HttpRequest {
 	b.HeaderNX("Content-Type", "application/json; charset=utf-8")
 	switch t := obj.(type) {
 	case string:
@@ -745,7 +745,7 @@ func (b *HttpRequest) ToFile(ctx gocontext.Context, filename string) error {
 
 // ToJSON returns the map that marshals from the body bytes as json in response .
 // it calls Response inner.
-func (b *HttpRequest) ToJSON(ctx gocontext.Context, v interface{}) error {
+func (b *HttpRequest) ToJSON(ctx gocontext.Context, v any) error {
 	data, err := b.Bytes(ctx)
 	if err != nil {
 		return err
@@ -757,7 +757,7 @@ func (b *HttpRequest) ToJSON(ctx gocontext.Context, v interface{}) error {
 
 	return errors.New(err.Error() + ",content:" + string(data))
 }
-func (b *HttpRequest) ToJSONWhenStatusOk(ctx gocontext.Context, v interface{}) (code int, err error) {
+func (b *HttpRequest) ToJSONWhenStatusOk(ctx gocontext.Context, v any) (code int, err error) {
 	code, data, err := b.BytesWithStatus(ctx)
 	if err != nil {
 		return code, err
@@ -771,7 +771,7 @@ func (b *HttpRequest) ToJSONWhenStatusOk(ctx gocontext.Context, v interface{}) (
 	}
 	return code, err
 }
-func (b *HttpRequest) ToJSONWithStatus(ctx gocontext.Context, v interface{}) (code int, err error) {
+func (b *HttpRequest) ToJSONWithStatus(ctx gocontext.Context, v any) (code int, err error) {
 	code, data, err := b.BytesWithStatus(ctx)
 	if err != nil {
 		return code, err
@@ -786,7 +786,7 @@ func (b *HttpRequest) ToJSONWithStatus(ctx gocontext.Context, v interface{}) (co
 
 // ToXML returns the map that marshals from the body bytes as xml in response .
 // it calls Response inner.
-func (b *HttpRequest) ToXML(ctx gocontext.Context, v interface{}) error {
+func (b *HttpRequest) ToXML(ctx gocontext.Context, v any) error {
 	data, err := b.Bytes(ctx)
 	if err != nil {
 		return err

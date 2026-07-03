@@ -15,10 +15,14 @@ type DB struct {
 	*DBResourceManager
 }
 
-// NewDb
+// NewDb 从配置初始化数据库
+// 配置了的数据库连接失败会返回错误(fail-fast);完全没配置数据库时返回可用的空实例
 func NewDb(conf *config.Config) (*DB, error) {
 	db := new(DB)
-	manager := New(conf.Viper)
+	manager, err := New(conf.Viper)
+	if err != nil {
+		return nil, err
+	}
 	db.DBResourceManager = manager
 	return db, nil
 }
@@ -29,14 +33,23 @@ type Repo struct {
 	tableName string
 }
 
+// NewDBTable 获取绑定到指定库和表的操作对象
+// dbname 必须是配置文件中 [mysql.xxx]/[sqlite.xxx] 里的配置名,不存在时 panic 并给出明确提示
+// (数据库连接在 NewApp 阶段已保证可用,走到这里失败只可能是配置名写错,尽早暴露)
 func (s *DB) NewDBTable(dbname string, tableName string) *Repo {
-	return &Repo{s.Get(dbname).WriteDB, tableName}
+	dm := s.Get(dbname)
+	if dm == nil || dm.WriteDB == nil {
+		panic(fmt.Sprintf("数据库 [%s] 不存在,请检查配置文件中的 [mysql.%s] 或 [sqlite.%s] 配置", dbname, dbname, dbname))
+	}
+	return &Repo{dm.WriteDB, tableName}
 }
+
+// SetTableName 修改 Repo 绑定的表名
 func (repo *Repo) SetTableName(name string) {
 	if len(name) == 0 {
 		return
 	}
-	repo.Engine.Table(name)
+	repo.tableName = name
 }
 
 func (repo *Repo) NewSession() *xorm.Session {
@@ -46,7 +59,7 @@ func (repo *Repo) NewSession() *xorm.Session {
 	return sess
 }
 
-func (repo *Repo) InsertOne(beans interface{}) (int64, error) {
+func (repo *Repo) InsertOne(beans any) (int64, error) {
 	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.InsertOne(beans)
@@ -56,7 +69,7 @@ func (repo *Repo) InsertOne(beans interface{}) (int64, error) {
 	return r, err
 }
 
-func (repo *Repo) Insert(beans ...interface{}) (int64, error) {
+func (repo *Repo) Insert(beans ...any) (int64, error) {
 	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.Insert(beans...)
@@ -66,7 +79,7 @@ func (repo *Repo) Insert(beans ...interface{}) (int64, error) {
 	return r, err
 }
 
-func (repo *Repo) Get(bean interface{}) (bool, error) {
+func (repo *Repo) Get(bean any) (bool, error) {
 	sess := repo.NewSession()
 	defer sess.Close()
 	r, err := sess.Get(bean)
@@ -76,7 +89,7 @@ func (repo *Repo) Get(bean interface{}) (bool, error) {
 	return r, err
 }
 
-func (repo *Repo) Where(query interface{}, args ...interface{}) *xorm.Session {
+func (repo *Repo) Where(query any, args ...any) *xorm.Session {
 	return repo.Engine.Table(repo.tableName).Where(query, args...)
 }
 
@@ -84,13 +97,13 @@ func (repo *Repo) Select(query string) *xorm.Session {
 	return repo.Engine.Table(repo.tableName).Select(query)
 }
 
-func (repo *Repo) In(column string, args ...interface{}) *xorm.Session {
+func (repo *Repo) In(column string, args ...any) *xorm.Session {
 	return repo.Engine.Table(repo.tableName).In(column, args...)
 }
 
-func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map[string][]byte, err error) {
+func (repo *Repo) Query(sql string, paramStr ...any) (resultsSlice []map[string][]byte, err error) {
 	sess := repo.NewSession()
-	args := make([]interface{}, 0)
+	args := make([]any, 0)
 	args = append(args, sql)
 	args = append(args, paramStr...)
 	defer sess.Close()
@@ -101,7 +114,7 @@ func (repo *Repo) Query(sql string, paramStr ...interface{}) (resultsSlice []map
 	return r, err
 }
 
-func (repo *Repo) Find(bean interface{}, condiBeans ...interface{}) error {
+func (repo *Repo) Find(bean any, condiBeans ...any) error {
 	sess := repo.NewSession()
 	defer sess.Close()
 	err := sess.Find(bean, condiBeans)
@@ -111,10 +124,10 @@ func (repo *Repo) Find(bean interface{}, condiBeans ...interface{}) error {
 	return err
 }
 
-func (repo *Repo) Exec(sql string, args ...interface{}) (sql.Result, error) {
+func (repo *Repo) Exec(sql string, args ...any) (sql.Result, error) {
 	sess := repo.NewSession()
 	defer sess.Close()
-	params := make([]interface{}, 0, len(args)+1)
+	params := make([]any, 0, len(args)+1)
 	params = append(params, sql)
 	for _, arg := range args {
 		params = append(params, arg)

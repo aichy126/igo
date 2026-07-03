@@ -47,10 +47,10 @@ func (l *Logger) Fatal(msg string, fields ...Field) {
 }
 
 func CtxInfo(msg string, fields ...Field) {
-	std.l.WithOptions(zap.AddCallerSkip(1)).Info(msg, fields...)
+	active().skip1.Info(msg, fields...)
 }
 func CtxError(msg string, fields ...Field) {
-	std.l.WithOptions(zap.AddCallerSkip(1)).Error(msg, fields...)
+	active().skip1.Error(msg, fields...)
 }
 
 var (
@@ -101,32 +101,31 @@ var (
 	Duration    = zap.Duration
 	Durationp   = zap.Durationp
 	Any         = zap.Any
-
-	Info   = std.Info
-	Warn   = std.Warn
-	Error  = std.Error
-	DPanic = std.DPanic
-	Panic  = std.Panic
-	Fatal  = std.Fatal
-	Debug  = std.Debug
 )
 
-// not safe for concurrent use
-// func ResetDefault(l *Logger) {
-// 	l.l = lg
-// 	std = l
-// 	Info = std.Info
-// 	Warn = std.Warn
-// 	Error = std.Error
-// 	DPanic = std.DPanic
-// 	Panic = std.Panic
-// 	Fatal = std.Fatal
-// 	Debug = std.Debug
-// }
+// 包级日志函数:未初始化时降级为控制台输出,任何时候调用都不会 panic
+// 直接调用底层 zap logger(基础 CallerSkip=1 恰好越过本函数),caller 指向业务代码
+func Info(msg string, fields ...Field)   { active().l.Info(msg, fields...) }
+func Warn(msg string, fields ...Field)   { active().l.Warn(msg, fields...) }
+func Error(msg string, fields ...Field)  { active().l.Error(msg, fields...) }
+func DPanic(msg string, fields ...Field) { active().l.DPanic(msg, fields...) }
+func Panic(msg string, fields ...Field)  { active().l.Panic(msg, fields...) }
+func Fatal(msg string, fields ...Field)  { active().l.Fatal(msg, fields...) }
+func Debug(msg string, fields ...Field)  { active().l.Debug(msg, fields...) }
 
 type Logger struct {
 	l     *zap.Logger // zap ensure that zap.Logger is safe for concurrent use
+	skip1 *zap.Logger // 供包级函数/Ctx 函数使用,多跳一层调用栈使 caller 指向业务代码
 	level Level
+}
+
+// newLogger 创建 Logger 并预生成 skip1 实例
+func newLogger(zl *zap.Logger, level Level) *Logger {
+	return &Logger{
+		l:     zl,
+		skip1: zl.WithOptions(zap.AddCallerSkip(1)),
+		level: level,
+	}
 }
 
 func LevelToNum(text string) zapcore.Level {
@@ -157,6 +156,8 @@ func (l *Logger) Sync() error {
 }
 
 func Sync() error {
+	stdMu.RLock()
+	defer stdMu.RUnlock()
 	if std != nil {
 		return std.Sync()
 	}

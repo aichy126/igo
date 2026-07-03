@@ -19,11 +19,11 @@ type LogHook interface {
 
 // LogEntry 日志条目
 type LogEntry struct {
-	Level     zapcore.Level          // 日志级别
-	Message   string                 // 日志消息
-	Fields    map[string]interface{} // 日志字段
-	Timestamp time.Time              // 时间戳
-	TraceID   string                 // 追踪ID（如果存在）
+	Level     zapcore.Level  // 日志级别
+	Message   string         // 日志消息
+	Fields    map[string]any // 日志字段
+	Timestamp time.Time      // 时间戳
+	TraceID   string         // 追踪ID（如果存在）
 }
 
 // hookCore 包装原始Core，添加钩子功能
@@ -85,7 +85,7 @@ func (h *hookCore) fireHooks(entry zapcore.Entry, fields []zapcore.Field) {
 	}
 
 	// 将zapcore.Field转换为map
-	fieldMap := make(map[string]interface{})
+	fieldMap := make(map[string]any)
 	for _, field := range fields {
 		// 简化处理，只提取基本类型
 		switch field.Type {

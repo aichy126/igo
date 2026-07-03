@@ -13,7 +13,7 @@ import (
 
 // ErrorHandler 错误处理中间件示例
 func ErrorHandler() gin.HandlerFunc {
-	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
+	return gin.CustomRecovery(func(c *gin.Context, recovered any) {
 		if err, ok := recovered.(string); ok {
 			log.Error("Panic recovered", log.Any("error", err))
 			c.JSON(http.StatusInternalServerError, gin.H{

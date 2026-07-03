@@ -24,7 +24,7 @@ import (
 // strResult,err:=httpRequest.httpRequest(ctx)
 
 var (
-	defaultSetting = HttpSettings{
+	defaultSetting = httpSettingsData{
 		timeout:  60 * time.Second,
 		gzip:     true, // 如果对端传过来的数据是以gzip压缩的， 我们是否尝试对之解密
 		dumpBody: true, // 当Debug(true)时，dump request时，是否也同时dump request的body,httputil.DumpRequest(req,bool）,
@@ -35,8 +35,8 @@ var (
 	defaultCookieJar, _ = cookiejar.New(nil)
 )
 
-type HttpSettings struct {
-	mutex           sync.RWMutex
+// httpSettingsData 承载全部配置字段且不含锁,可以安全地按值拷贝
+type httpSettingsData struct {
 	debug           bool
 	userAgent       string
 	timeout         time.Duration
@@ -51,9 +51,14 @@ type HttpSettings struct {
 	client          *http.Client
 }
 
+type HttpSettings struct {
+	mutex sync.RWMutex
+	httpSettingsData
+}
+
 func NewHttpSettings() *HttpSettings {
 	setting := &HttpSettings{}
-	*setting = getDefaultSetting()
+	setting.httpSettingsData = getDefaultSetting()
 	setting.transport = nil
 	setting.client = nil
 
@@ -146,7 +151,8 @@ func (setting *HttpSettings) request(ctx gocontext.Context, rawurl, method strin
 
 	setting.checkClient()
 	setting.mutex.RLock()
-	httpReq.setting = *setting
+	// 只拷贝配置数据,不拷贝锁(新 HttpSettings 拥有自己的零值锁)
+	httpReq.setting = HttpSettings{httpSettingsData: setting.httpSettingsData}
 	setting.mutex.RUnlock()
 	return httpReq
 
@@ -348,12 +354,15 @@ func (setting *HttpSettings) SetProxy(proxy func(*http.Request) (*url.URL, error
 }
 
 // SetDefaultSetting Overwrite default settings
-func SetDefaultSetting(setting HttpSettings) {
+func SetDefaultSetting(setting *HttpSettings) {
+	if setting == nil {
+		return
+	}
 	defaultSettingMutex.Lock()
-	defaultSetting = setting
+	defaultSetting = setting.httpSettingsData
 	defaultSettingMutex.Unlock()
 }
-func getDefaultSetting() (setting HttpSettings) {
+func getDefaultSetting() (setting httpSettingsData) {
 	defaultSettingMutex.RLock()
 	setting = defaultSetting
 	defaultSettingMutex.RUnlock()

@@ -26,32 +26,32 @@ const (
 type Context = IContext
 type IContext interface {
 	context.Context
-	Set(key string, value interface{})
+	Set(key string, value any)
 	// SetMeta与Set的区别是 SetMeta设置的key在ctx.GetHeaderMap()时会返回
 	// 而这个map通常是ddns client请求别的服务时需要透传过去的Header
 	// 故如果你觉得这个key需要进行透传，请用SetMeta
 	SetMeta(key string, value string)
-	WithValue(key interface{}, val interface{}) IContext
+	WithValue(key any, val any) IContext
 	WithCancel() (IContext, CancelFunc)
 	WithTimeout(d time.Duration) (IContext, CancelFunc)
 
 	GetHeaders() http.Header
 
-	Get(key string) (value interface{}, exists bool)
+	Get(key string) (value any, exists bool)
 
 	GetString(key string) (v string)
 	GetInt64(key string) (i int64)
 	GetInt(key string) (i int)
 
 	GetGoContext() context.Context
-	GetAllKey() map[string]interface{}
+	GetAllKey() map[string]any
 	GetHttpRequest() *http.Request
 	LogInfo(msg string, fields ...log.Field)
 	LogError(msg string, fields ...log.Field)
 }
 type contextImpl struct {
 	context.Context
-	Keys map[string]interface{}
+	Keys map[string]any
 	// 用户记录keys中哪些key 作为header使用，当进行ddns请求时，这些header将被序列化后传递到对端
 	meta map[string]string
 
@@ -74,7 +74,7 @@ var _ IContext = &contextImpl{}
 func WithContext(ctx context.Context) *contextImpl {
 	c := &contextImpl{
 		Context: ctx,
-		Keys:    make(map[string]interface{}),
+		Keys:    make(map[string]any),
 		meta:    make(map[string]string),
 	}
 	return c
@@ -120,7 +120,7 @@ func WithTimeout(goctx context.Context, d time.Duration) (IContext, CancelFunc) 
 	}
 }
 
-func WithValue(parent context.Context, key interface{}, val interface{}) IContext {
+func WithValue(parent context.Context, key any, val any) IContext {
 	switch p := parent.(type) {
 	case IContext:
 		return p.WithValue(key, val)
@@ -162,7 +162,7 @@ func (ctx *contextImpl) GetHeaders() http.Header {
 }
 
 // 重新实现context.Context 的Value()接口
-func (c *contextImpl) Value(key interface{}) interface{} {
+func (c *contextImpl) Value(key any) any {
 	keyString, ok := key.(string)
 	if ok {
 		value, ok := c.Get(keyString)
@@ -182,7 +182,7 @@ func (c *contextImpl) Clone() IContext {
 func (c *contextImpl) clone() *contextImpl {
 	newCtx := &contextImpl{
 		Context: c.Context,
-		Keys:    make(map[string]interface{}),
+		Keys:    make(map[string]any),
 		meta:    make(map[string]string),
 	}
 	for key, value := range c.Keys {
@@ -196,17 +196,18 @@ func (c *contextImpl) clone() *contextImpl {
 
 // Set is used to store a new key/value pair exclusively for this context.
 // It also lazy initializes  c.Keys if it was not used previously.
-func (c *contextImpl) Set(key string, value interface{}) {
+func (c *contextImpl) Set(key string, value any) {
 	c.lock.Lock()
 	if c.Keys == nil {
-		c.Keys = make(map[string]interface{})
+		c.Keys = make(map[string]any)
 	}
+	// 只存 Keys map,不再包一层 context.WithValue:
+	// Value() 已重写为优先查 Keys,反复 Set 不会让 context 链无限增长
 	c.Keys[strings.ToUpper(key)] = value
-	c.Context = context.WithValue(c.Context, key, value)
 	c.lock.Unlock()
 }
 
-func (c *contextImpl) WithValue(key interface{}, val interface{}) IContext {
+func (c *contextImpl) WithValue(key any, val any) IContext {
 	switch k := key.(type) {
 	case string:
 		c.Set(k, val)
@@ -221,28 +222,26 @@ func (c *contextImpl) WithValue(key interface{}, val interface{}) IContext {
 func (c *contextImpl) SetMeta(key string, value string) {
 	c.lock.Lock()
 	if c.Keys == nil {
-		c.Keys = make(map[string]interface{})
+		c.Keys = make(map[string]any)
 	}
 	c.Keys[strings.ToUpper(key)] = value
 	if c.meta == nil {
 		c.meta = make(map[string]string)
 	}
 	c.meta[key] = value
-	c.Context = context.WithValue(c.Context, key, value)
-
 	c.lock.Unlock()
 }
 
 // Get returns the value for the given key, ie: (value, true).
 // If the value does not exists it returns (nil, false)
-func (c *contextImpl) Get(key string) (value interface{}, exists bool) {
+func (c *contextImpl) Get(key string) (value any, exists bool) {
 	c.lock.RLock()
 	value, exists = c.get(key)
 	c.lock.RUnlock()
 	return
 }
 
-func (c *contextImpl) get(key string) (value interface{}, exists bool) {
+func (c *contextImpl) get(key string) (value any, exists bool) {
 	value, exists = c.Keys[strings.ToUpper(key)]
 	if exists {
 		return
@@ -266,7 +265,18 @@ func (c *contextImpl) getString(key string) (v string, exists bool) {
 	if !exists {
 		return
 	}
-	return fmt.Sprintf("%v", obj.([]string)[0]), exists
+	switch val := obj.(type) {
+	case string:
+		return val, true
+	case []string:
+		// http header 的值是 []string,取第一个
+		if len(val) > 0 {
+			return val[0], true
+		}
+		return "", true
+	default:
+		return fmt.Sprintf("%v", val), true
+	}
 }
 
 // GetInt returns the value associated with the key as an integer.
@@ -305,10 +315,10 @@ func (ctx *contextImpl) GetGoContext() context.Context {
 	return ctx
 }
 
-func (ctx *contextImpl) GetAllKey() map[string]interface{} {
+func (ctx *contextImpl) GetAllKey() map[string]any {
 	ctx.lock.RLock()
 	defer ctx.lock.RUnlock()
-	retMap := make(map[string]interface{}, 0)
+	retMap := make(map[string]any, 0)
 	for key, value := range ctx.Keys {
 		retMap[key] = value
 		//retMap[key] = value.([]string)[0]
@@ -329,7 +339,7 @@ func (ctx *contextImpl) GetHttpRequest() *http.Request {
 }
 
 func (ctx *contextImpl) LogInfo(msg string, fields ...log.Field) {
-	traceId, has := ctx.get("traceId")
+	traceId, has := ctx.Get("traceId")
 	if has {
 		fields = append(fields, log.Any("traceId", traceId))
 	}
@@ -337,19 +347,16 @@ func (ctx *contextImpl) LogInfo(msg string, fields ...log.Field) {
 }
 
 func (ctx *contextImpl) LogError(msg string, fields ...log.Field) {
-	traceId, has := ctx.get("traceId")
+	traceId, has := ctx.Get("traceId")
 	if has {
 		fields = append(fields, log.Any("traceId", traceId))
 	}
-	log.CtxInfo(msg, fields...)
+	log.CtxError(msg, fields...)
 }
 
-type IGetter interface {
-	//为了去除去gin.Context的直接依赖
-	Get(string) (value interface{}, exists bool)
-}
-
-func Ginform(c IGetter) IContext {
+// Ginform 将 *gin.Context 或 IContext 统一转换为 IContext
+// 参数类型为 any:gin v1.10+ 的 Context.Get 签名变为 Get(any),无法再用小接口约束
+func Ginform(c any) IContext {
 	if c == nil {
 		log.Error("common.Transform c_is_nil", log.Any("c", c))
 		return NewContext()

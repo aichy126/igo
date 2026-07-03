@@ -95,7 +95,7 @@ func (c *HttpClient) Put(ctx context.IContext, url string, contentType string, b
 	err = readResponseBody(r)
 	return r, err
 }
-func (c *HttpClient) PostBytes(ctx context.IContext, url string, contentType string, body interface{}) (bytes []byte, err error) {
+func (c *HttpClient) PostBytes(ctx context.IContext, url string, contentType string, body any) (bytes []byte, err error) {
 	return c.ContextRequestPost(ctx, url).
 		Header("Content-Type", contentType).Body(body).Bytes(ctx)
 
@@ -112,7 +112,7 @@ func (c *HttpClient) GetJsonWithHeader(ctx context.IContext, urlStr string, head
 	return
 }
 
-func (c *HttpClient) GetJsonWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, target interface{}) (err error) {
+func (c *HttpClient) GetJsonWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, target any) (err error) {
 	data, err := c.RequestJsonWithHeader(ctx, urlStr, "GET", header, nil)
 	if err != nil {
 		return err
@@ -123,7 +123,7 @@ func (c *HttpClient) GetJsonWithHeaderAs(ctx context.IContext, urlStr string, he
 	return
 }
 
-func (c *HttpClient) PostJsonWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, content interface{}, target interface{}) (err error) {
+func (c *HttpClient) PostJsonWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, content any, target any) (err error) {
 	data, err := c.RequestJsonWithHeader(ctx, urlStr, "POST", header, content)
 	if err != nil {
 		return err
@@ -134,7 +134,7 @@ func (c *HttpClient) PostJsonWithHeaderAs(ctx context.IContext, urlStr string, h
 	return
 }
 
-func (c *HttpClient) PostFormWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, v url.Values, target interface{}) (err error) {
+func (c *HttpClient) PostFormWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, v url.Values, target any) (err error) {
 	data, err := c.requestWithHeader(ctx, urlStr, "POST", "application/x-www-form-urlencoded", header, v)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (c *HttpClient) PostFormWithHeaderAs(ctx context.IContext, urlStr string, h
 
 }
 
-func (c *HttpClient) PostFormFileWithHeaderAs(ctx context.IContext, urlStr string, contentType string, header http.Header, v interface{}, target interface{}) (err error) {
+func (c *HttpClient) PostFormFileWithHeaderAs(ctx context.IContext, urlStr string, contentType string, header http.Header, v any, target any) (err error) {
 	data, err := c.requestWithHeader(ctx, urlStr, "POST", contentType, header, v)
 	if err != nil {
 		return err
@@ -162,12 +162,12 @@ func (c *HttpClient) PostFormWithHeader(ctx context.IContext, urlStr string, hea
 	return c.requestWithHeader(ctx, urlStr, "POST", "application/x-www-form-urlencoded", header, v)
 }
 
-func (c *HttpClient) RequestJsonWithHeader(ctx context.IContext, urlStr string, method string, header http.Header, content interface{}) (data []byte, err error) {
+func (c *HttpClient) RequestJsonWithHeader(ctx context.IContext, urlStr string, method string, header http.Header, content any) (data []byte, err error) {
 	return c.requestWithHeader(ctx, urlStr, method, "application/json", header, content)
 
 }
 
-func (c *HttpClient) requestWithHeader(ctx context.IContext, urlStr string, method string, contentType string, header http.Header, content interface{}) (data []byte, err error) {
+func (c *HttpClient) requestWithHeader(ctx context.IContext, urlStr string, method string, contentType string, header http.Header, content any) (data []byte, err error) {
 	if header == nil {
 		header = make(http.Header)
 	}
@@ -176,7 +176,7 @@ func (c *HttpClient) requestWithHeader(ctx context.IContext, urlStr string, meth
 		Body(content).Header("Content-Type", contentType).Bytes(ctx)
 }
 
-func (c *HttpClient) GetWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, target interface{}) (err error) {
+func (c *HttpClient) GetWithHeaderAs(ctx context.IContext, urlStr string, header http.Header, target any) (err error) {
 	data, err := c.requestWithHeader(ctx, urlStr, "GET", "application/x-www-form-urlencoded", header, nil)
 	if err != nil {
 		return err
@@ -202,15 +202,15 @@ func (c *HttpClient) GetBytesWithStatus(ctx context.IContext, url string) (int, 
 }
 
 // 从url获取返回,并以json格式解析到target
-func (c *HttpClient) GetAs(ctx context.IContext, url string, target interface{}) error {
+func (c *HttpClient) GetAs(ctx context.IContext, url string, target any) error {
 	return c.ContextRequestGet(ctx, url).ToJSON(ctx, target)
 }
 
-func (c *HttpClient) GetAsWhenStatusOk(ctx context.IContext, url string, target interface{}) (int, error) {
+func (c *HttpClient) GetAsWhenStatusOk(ctx context.IContext, url string, target any) (int, error) {
 	return c.ContextRequestGet(ctx, url).ToJSONWhenStatusOk(ctx, target)
 }
 
-func (c *HttpClient) PostFormAs(ctx context.IContext, url string, v url.Values, target interface{}) error {
+func (c *HttpClient) PostFormAs(ctx context.IContext, url string, v url.Values, target any) error {
 	return c.ContextRequestPost(ctx, url).Body(v).ToJSON(ctx, target)
 }
 
@@ -222,23 +222,23 @@ func (c *HttpClient) PostFormBytesWithStatus(ctx context.IContext, urlStr string
 	return c.ContextRequestPost(ctx, urlStr).
 		Body(v).BytesWithStatus(ctx)
 }
-func (c *HttpClient) PostJsonBytesWithStatus(ctx context.IContext, urlStr string, content interface{}) (code int, body []byte, err error) {
+func (c *HttpClient) PostJsonBytesWithStatus(ctx context.IContext, urlStr string, content any) (code int, body []byte, err error) {
 	return c.ContextRequestPost(ctx, urlStr).JSONBody(content).BytesWithStatus(ctx)
 }
 
-func (c *HttpClient) PostJsonAs(ctx context.IContext, urlStr string, content interface{}, target interface{}) (err error) {
+func (c *HttpClient) PostJsonAs(ctx context.IContext, urlStr string, content any, target any) (err error) {
 	return c.ContextRequestPost(ctx, urlStr).JSONBody(content).ToJSON(ctx, target)
 }
 
-func (c *HttpClient) PutJsonAs(ctx context.IContext, urlStr string, content interface{}, target interface{}) (err error) {
+func (c *HttpClient) PutJsonAs(ctx context.IContext, urlStr string, content any, target any) (err error) {
 	return c.ContextRequestPut(ctx, urlStr).JSONBody(content).ToJSON(ctx, target)
 }
 
-func (c *HttpClient) PutAsJson(ctx context.IContext, urlStr string, content interface{}) (data []byte, err error) {
+func (c *HttpClient) PutAsJson(ctx context.IContext, urlStr string, content any) (data []byte, err error) {
 	return c.ContextRequestPut(ctx, urlStr).JSONBody(content).Bytes(ctx)
 }
 
-func (c *HttpClient) PostJson(ctx context.IContext, urlStr string, content interface{}) (data []byte, err error) {
+func (c *HttpClient) PostJson(ctx context.IContext, urlStr string, content any) (data []byte, err error) {
 	return c.ContextRequestPost(ctx, urlStr).JSONBody(content).Bytes(ctx)
 }
 

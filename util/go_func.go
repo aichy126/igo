@@ -37,7 +37,7 @@ func Recover() {
 	}
 }
 
-func GoroutineFunc(fun interface{}, args ...interface{}) (err error) {
+func GoroutineFunc(fun any, args ...any) (err error) {
 	v := reflect.ValueOf(fun)
 	go func(err error) {
 		defer Recover()

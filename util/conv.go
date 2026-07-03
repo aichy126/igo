@@ -43,10 +43,11 @@ func ToInt64(v any) (int64, error) {
 // Uint convert value to uint64
 func Uint(v any) uint64 {
 	iv, _ := mathutil.ToUint(v)
-	return iv
+	return uint64(iv)
 }
 
 // ToUint try to convert value to uint64
 func ToUint(v any) (uint64, error) {
-	return mathutil.ToUint(v)
+	iv, err := mathutil.ToUint(v)
+	return uint64(iv), err
 }
