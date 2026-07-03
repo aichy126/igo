@@ -9,18 +9,23 @@ import (
 	"github.com/aichy126/igo/example/dao"
 	"github.com/aichy126/igo/example/hooks"
 	"github.com/aichy126/igo/log"
+	"github.com/aichy126/igo/res"
 	"github.com/aichy126/igo/util"
+	"github.com/aichy126/igo/web"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	// 初始化应用，现在返回错误而不是panic
+	// 初始化应用(配置了的组件初始化失败会返回错误;igo.App 全局实例自动设置)
 	app, err := igo.NewApp("") //初始化各个组件
 	if err != nil {
 		log.Error("应用初始化失败", log.Any("error", err))
 		os.Exit(1)
 	}
-	igo.App = app
+
+	// 一行开启 /health 健康检查(带 db/redis 连通性检测)和跨域支持
+	app.EnableHealthCheck()
+	app.Web.Router.Use(web.Cors())
 
 	debug := util.ConfGetbool("local.debug")
 	util.Dump(debug)
@@ -79,12 +84,12 @@ func Router(r *gin.Engine) {
 	r.GET("db/sync", DbSyncSqlite)
 
 	// 新功能测试路由
-	r.POST("order/create", CreateOrder)           // 跨表事务：创建订单
-	r.POST("db/batch-sync", BatchSyncData)        // 跨表事务：批量同步
-	r.GET("test/log-hook", TestLogHook)           // 测试日志钩子
-	r.POST("config/reload", ReloadConfig)         // 配置热重载
-	r.GET("health", HealthCheck)                  // 健康检查
-	r.GET("middleware/test", MiddlewareTest)      // 测试中间件
+	r.POST("order/create", CreateOrder)      // 跨表事务：创建订单
+	r.POST("db/batch-sync", BatchSyncData)   // 跨表事务：批量同步
+	r.GET("test/log-hook", TestLogHook)      // 测试日志钩子
+	r.POST("config/reload", ReloadConfig)    // 配置热重载
+	r.GET("middleware/test", MiddlewareTest) // 测试中间件
+	// 健康检查由 app.EnableHealthCheck() 提供,见 main()
 }
 
 func Ping(c *gin.Context) {
@@ -139,11 +144,7 @@ func CreateOrder(c *gin.Context) {
 
 	var req CreateOrderReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "参数错误",
-			"error":   err.Error(),
-		})
+		res.RfailCode(c, 400, "参数错误: "+err.Error())
 		return
 	}
 
@@ -162,19 +163,12 @@ func CreateOrder(c *gin.Context) {
 	order, err := orderDao.CreateOrderWithItems(ctx, req.UserID, items)
 	if err != nil {
 		ctx.LogError("创建订单失败", log.Any("error", err))
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "创建订单失败",
-			"error":   err.Error(),
-		})
+		res.Rfail(c, "创建订单失败: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "订单创建成功",
-		"data":    order,
-	})
+	// 统一响应格式:{"code":0,"msg":"success","data":order}
+	res.Rsucc(c, order)
 }
 
 // BatchSyncData 批量同步数据（跨表事务示例）
@@ -185,18 +179,11 @@ func BatchSyncData(c *gin.Context) {
 	orderDao := dao.NewOrderDao()
 	err := orderDao.BatchSync(ctx)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "同步失败",
-			"error":   err.Error(),
-		})
+		res.Rfail(c, "同步失败: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "同步成功",
-	})
+	res.Rsucc(c, nil)
 }
 
 // TestLogHook 测试日志钩子
@@ -229,26 +216,11 @@ func ReloadConfig(c *gin.Context) {
 	ctx.LogInfo("手动重载配置")
 
 	if err := igo.App.ReloadConfig(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "配置重载失败",
-			"error":   err.Error(),
-		})
+		res.Rfail(c, "配置重载失败: "+err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "配置重载成功",
-	})
-}
-
-// HealthCheck 健康检查
-func HealthCheck(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"status":  "healthy",
-		"message": "应用运行正常",
-	})
+	res.Rsucc(c, nil)
 }
 
 // MiddlewareTest 测试中间件
