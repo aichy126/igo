@@ -5,3 +5,4 @@
 /vendor
 /dev
 *.log
+example/test.db
