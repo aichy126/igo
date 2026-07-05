@@ -90,13 +90,12 @@ func NewContextWithGinHeader(c *gin.Context) IContext {
 	for k, v := range c.Request.Header {
 		ctx.Set(k, v)
 	}
-	//继承gin traceId
+	//继承gin traceId;用 SetMeta 存,使 traceId 自动透传到 httpclient 发起的下游请求
 	traceId := c.GetString("traceId")
-	if traceId != "" {
-		ctx.Set("traceId", traceId)
-	} else {
-		ctx.Set("traceId", uuid.New().String())
+	if traceId == "" {
+		traceId = uuid.New().String()
 	}
+	ctx.SetMeta("traceId", traceId)
 	return ctx
 }
 
@@ -156,8 +155,15 @@ func (c *contextImpl) WithTimeout(d time.Duration) (IContext, CancelFunc) {
 
 }
 
+// GetHeaders 返回需要跨服务透传的 header:SetMeta 设置的所有 key(含自动注入的 traceId)。
+// httpclient 发起请求时会把这些 header 带给下游服务。
 func (ctx *contextImpl) GetHeaders() http.Header {
+	ctx.lock.RLock()
+	defer ctx.lock.RUnlock()
 	header := http.Header{}
+	for k, v := range ctx.meta {
+		header.Set(k, v)
+	}
 	return header
 }
 
@@ -207,16 +213,19 @@ func (c *contextImpl) Set(key string, value any) {
 	c.lock.Unlock()
 }
 
+// WithValue 返回携带新键值的派生 context,不修改原 context(与标准 context.WithValue 语义一致)。
+// 注意:v0.4.0 起为破坏性变更,此前的实现会原地修改并返回自身。
 func (c *contextImpl) WithValue(key any, val any) IContext {
+	c.lock.RLock()
+	newCtx := c.clone()
+	c.lock.RUnlock()
 	switch k := key.(type) {
 	case string:
-		c.Set(k, val)
+		newCtx.Set(k, val)
 	default:
-		c.lock.Lock()
-		c.Context = context.WithValue(c.Context, key, val)
-		c.lock.Unlock()
+		newCtx.Context = context.WithValue(newCtx.Context, key, val)
 	}
-	return c
+	return newCtx
 }
 
 func (c *contextImpl) SetMeta(key string, value string) {

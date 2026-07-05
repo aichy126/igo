@@ -91,3 +91,39 @@ func TestRepeatedSetNoLeak(t *testing.T) {
 		t.Errorf("GetInt(counter) = %d, want 9999", got)
 	}
 }
+
+// TestMetaHeaders 验证 SetMeta 的 key 会出现在 GetHeaders(跨服务透传)
+func TestMetaHeaders(t *testing.T) {
+	ctx := NewContext()
+	ctx.SetMeta("traceId", "trace-abc")
+	ctx.Set("secret", "not-propagated") // 普通 Set 不透传
+
+	headers := ctx.GetHeaders()
+	if got := headers.Get("traceId"); got != "trace-abc" {
+		t.Errorf("GetHeaders traceId = %q, want trace-abc", got)
+	}
+	if got := headers.Get("secret"); got != "" {
+		t.Errorf("普通 Set 的 key 不应出现在透传 header 中, got %q", got)
+	}
+	// SetMeta 的值也能正常 Get
+	if got := ctx.GetString("traceId"); got != "trace-abc" {
+		t.Errorf("GetString(traceId) = %q", got)
+	}
+}
+
+// TestWithValueDerive 验证 WithValue 返回派生副本,不修改原 context
+func TestWithValueDerive(t *testing.T) {
+	ctx := NewContext()
+	ctx.Set("base", "origin")
+
+	derived := ctx.WithValue("extra", "added")
+	if got := derived.GetString("extra"); got != "added" {
+		t.Errorf("派生 ctx 应有新值, got %q", got)
+	}
+	if got := derived.GetString("base"); got != "origin" {
+		t.Errorf("派生 ctx 应继承原值, got %q", got)
+	}
+	if _, exists := ctx.Get("extra"); exists {
+		t.Error("WithValue 不应修改原 context")
+	}
+}
