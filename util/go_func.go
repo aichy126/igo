@@ -1,7 +1,6 @@
 package util
 
 import (
-	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -49,7 +48,7 @@ func GoroutineFunc(fun any, args ...any) (err error) {
 			}
 			v.Call(pps)
 		default:
-			err = errors.New(fmt.Sprintf("func is not func,type=%v", v.Kind().String()))
+			err = fmt.Errorf("func is not func,type=%v", v.Kind().String())
 			log.Error("GoroutineFunc", log.Any("error", err))
 		}
 	}(err)

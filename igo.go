@@ -56,6 +56,15 @@ func NewApp(ConfigPath string) (*Application, error) {
 		return nil, fmt.Errorf("日志系统初始化失败: %w", err)
 	}
 
+	// 配置热重载时同步日志级别:改 local.logger.level 即时生效,无需重启
+	a.Conf.AddChangeCallback(func() {
+		if lvl := a.Conf.GetString("local.logger.level"); lvl != "" {
+			if err := log.SetLevel(lvl); err != nil {
+				log.Warn("日志级别热更新失败", log.Any("error", err))
+			}
+		}
+	})
+
 	//db(配置了就必须初始化成功,未配置返回空实例)
 	dbInstance, err := db.NewDb(conf)
 	if err != nil {

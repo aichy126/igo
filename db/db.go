@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -57,6 +58,15 @@ func (repo *Repo) NewSession() *xorm.Session {
 	newSession := repo.Engine.NewSession()
 	sess = newSession.Table(repo.tableName)
 	return sess
+}
+
+// WithCtx 返回绑定了 context 的查询 session:请求取消/超时后查询会被中断,
+// 慢查询不会在客户端断开后继续占用数据库。igo 的 context.IContext 可直接传入。
+// 使用示例：
+//
+//	err := repo.WithCtx(ctx).Where("uid = ?", uid).Find(&rows)
+func (repo *Repo) WithCtx(ctx context.Context) *xorm.Session {
+	return repo.Engine.Table(repo.tableName).Context(ctx)
 }
 
 func (repo *Repo) InsertOne(beans any) (int64, error) {
@@ -165,6 +175,41 @@ func (s *DB) NewSession(dbname string) *xorm.Session {
 		return nil
 	}
 	return dm.WriteDB.NewSession()
+}
+
+// Transaction 闭包式事务:fn 返回 error 或 panic 时自动回滚,正常返回时自动提交。
+// 相比 BeginTx 免去手动管理 Commit/Rollback/Close,推荐优先使用。
+// 使用示例：
+//
+//	err := igo.App.DB.Transaction("test", func(sess *xorm.Session) error {
+//	    if _, err := sess.Table("users").Insert(&user); err != nil {
+//	        return err // 自动回滚
+//	    }
+//	    _, err := sess.Table("orders").Insert(&order)
+//	    return err // nil 则自动提交
+//	})
+func (s *DB) Transaction(dbname string, fn func(sess *xorm.Session) error) error {
+	sess, err := s.BeginTx(dbname)
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	defer func() {
+		// fn panic 时回滚后继续向上抛,避免连接带着未完成事务归还连接池
+		if r := recover(); r != nil {
+			_ = sess.Rollback()
+			panic(r)
+		}
+	}()
+
+	if err := fn(sess); err != nil {
+		if rbErr := sess.Rollback(); rbErr != nil {
+			log.Error("事务回滚失败", log.Any("dbname", dbname), log.Any("error", rbErr))
+		}
+		return err
+	}
+	return sess.Commit()
 }
 
 // BeginTx 启动事务（支持跨表操作）

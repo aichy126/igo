@@ -1,17 +1,10 @@
 package util
 
 import (
-	"os"
-
-	"github.com/gookit/goutil/dump"
+	"github.com/davecgh/go-spew/spew"
 )
 
-const defaultSkip = 3
-
-var (
-	std = dump.NewDumper(os.Stdout, defaultSkip)
-)
-
+// Dump 调试输出任意值(带类型和结构信息),仅用于本地开发调试
 func Dump(vs ...any) {
-	std.Print(vs...)
+	spew.Dump(vs...)
 }

@@ -1,11 +1,13 @@
 package db
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/viper"
+	"xorm.io/xorm"
 )
 
 func sqliteViper(t *testing.T) *viper.Viper {
@@ -124,5 +126,64 @@ func TestRepoCRUD(t *testing.T) {
 	has, err = repo2.Where("name = ?", "alice").Get(new(User))
 	if err != nil || !has {
 		t.Errorf("SetTableName 后查询失败: has=%v err=%v", has, err)
+	}
+}
+
+// TestTransaction 验证闭包事务:出错回滚、成功提交、panic 回滚
+func TestTransaction(t *testing.T) {
+	m, err := New(sqliteViper(t))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer m.Close()
+	d := &DB{DBResourceManager: m}
+
+	type Account struct {
+		Id      int64 `xorm:"pk autoincr"`
+		Balance int64
+	}
+	if err := d.Get("test").WriteDB.Sync2(new(Account)); err != nil {
+		t.Fatalf("Sync2 error: %v", err)
+	}
+
+	// 成功提交
+	err = d.Transaction("test", func(sess *xorm.Session) error {
+		_, err := sess.Table("account").Insert(&Account{Balance: 100})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("Transaction 提交失败: %v", err)
+	}
+
+	// 出错回滚
+	err = d.Transaction("test", func(sess *xorm.Session) error {
+		if _, err := sess.Table("account").Insert(&Account{Balance: 200}); err != nil {
+			return err
+		}
+		return fmt.Errorf("业务失败")
+	})
+	if err == nil {
+		t.Fatal("Transaction 应返回业务错误")
+	}
+
+	// panic 回滚且继续向上抛
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("panic 应继续向上抛")
+			}
+		}()
+		_ = d.Transaction("test", func(sess *xorm.Session) error {
+			_, _ = sess.Table("account").Insert(&Account{Balance: 300})
+			panic("boom")
+		})
+	}()
+
+	count, err := d.Get("test").WriteDB.Table("account").Count(new(Account))
+	if err != nil {
+		t.Fatalf("Count error: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("回滚后应只有 1 条记录, got %d", count)
 	}
 }

@@ -129,6 +129,26 @@ func InitAccessLogger(filename, level string, maxSize, maxBackups, maxAge int) *
 	return zap.New(core)
 }
 
+// atomicLevel 全局日志级别,支持运行时动态调整(SetLevel)
+var atomicLevel = zap.NewAtomicLevel()
+
+// SetLevel 动态调整全局日志级别(无需重启)。
+// level 支持 debug/info/warn/error 等,解析失败时返回错误且不改变当前级别。
+// igo.NewApp 会自动把它挂到配置热重载回调上:改配置文件里的 local.logger.level 即时生效。
+func SetLevel(level string) error {
+	var l zapcore.Level
+	if err := l.UnmarshalText([]byte(level)); err != nil {
+		return fmt.Errorf("无效的日志级别 %q: %w", level, err)
+	}
+	atomicLevel.SetLevel(l)
+	return nil
+}
+
+// GetLevel 返回当前生效的日志级别
+func GetLevel() Level {
+	return atomicLevel.Level()
+}
+
 // InitLogger 初始化全局 Logger
 func InitLogger(filename, level string, maxSize, maxBackups, maxAge int, debug bool) (err error) {
 	writeSyncer := getLogWriter(filename, maxSize, maxBackups, maxAge)
@@ -138,13 +158,14 @@ func InitLogger(filename, level string, maxSize, maxBackups, maxAge int, debug b
 	if err != nil {
 		return fmt.Errorf("无效的日志级别 %q: %w", level, err)
 	}
+	atomicLevel.SetLevel(*l)
 	var baseCore zapcore.Core
 	if debug {
 		//输出到日志和控制台
-		baseCore = zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(writeSyncer, zapcore.AddSync(os.Stdout)), l)
+		baseCore = zapcore.NewCore(encoder, zapcore.NewMultiWriteSyncer(writeSyncer, zapcore.AddSync(os.Stdout)), atomicLevel)
 	} else {
 		//只输出到日志
-		baseCore = zapcore.NewCore(encoder, writeSyncer, l)
+		baseCore = zapcore.NewCore(encoder, writeSyncer, atomicLevel)
 	}
 
 	// 包装为hookCore，支持日志钩子

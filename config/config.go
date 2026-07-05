@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,15 @@ import (
 	consulapi "github.com/hashicorp/consul/api"
 	"github.com/spf13/viper"
 )
+
+// applyEnvOverrides 启用环境变量覆盖:IGO_ 前缀,配置路径中的点换成下划线。
+// 例如 IGO_LOCAL_ADDRESS=:9000 覆盖 local.address,IGO_LOCAL_DEBUG=false 覆盖 local.debug。
+// 环境变量优先级高于配置文件,适合 Docker/K8s 部署时无需改配置文件。
+func applyEnvOverrides(v *viper.Viper) {
+	v.SetEnvPrefix("IGO")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	v.AutomaticEnv()
+}
 
 const EnvConfigPath = "CONFIG_PATH"
 const EnvConfigAddress = "CONFIG_ADDRESS"
@@ -56,6 +66,7 @@ func NewConfig(ConfigPath string) (*Config, error) {
 
 	localConfig := viper.New()
 	localConfig.SetConfigFile(ConfigFilePath)
+	applyEnvOverrides(localConfig)
 	err := localConfig.ReadInConfig() // Find and read the config file
 	if err == nil {                   // Handle errors reading the config file
 		Conf.Viper = localConfig
@@ -97,6 +108,7 @@ func NewConfig(ConfigPath string) (*Config, error) {
 func getConsulConf(address, key string) (*viper.Viper, error) {
 	consulConfig := viper.New()
 	consulConfig.SetConfigType("toml")
+	applyEnvOverrides(consulConfig)
 	if len(address) > 0 && len(key) > 0 {
 		if err := newConfigClient(address); err != nil {
 			return consulConfig, err
@@ -221,6 +233,7 @@ func (c *Config) triggerCallbacks() {
 func (c *Config) reloadFromFile() error {
 	newConfig := viper.New()
 	newConfig.SetConfigFile(c.configPath)
+	applyEnvOverrides(newConfig)
 	if err := newConfig.ReadInConfig(); err != nil {
 		return err
 	}
