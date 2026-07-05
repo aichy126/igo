@@ -42,9 +42,12 @@ func NewWeb(conf *config.Config) (*Web, error) {
 		// debug 模式下保留 gin 控制台请求日志,方便本地开发
 		web.Router.Use(gin.Logger())
 	}
-	web.initRouters()
 
-	Wrap(web.Router)
+	// pprof 和路由列表有信息泄露风险,仅在 debug 模式或显式配置 local.pprof=true 时注册
+	if Debug || conf.GetBool("local.pprof") {
+		web.initRouters()
+		Wrap(web.Router)
+	}
 
 	//Monitor gin logs
 	ShowAccess := conf.GetBool("local.logger.access")
