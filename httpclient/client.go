@@ -15,6 +15,7 @@ package httpclient
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -67,9 +68,41 @@ func WithRetries(n int) Option {
 	}
 }
 
-// WithTransport 自定义 Transport(代理、TLS 配置等场景)
+// WithTransport 自定义 Transport(完全接管;与 WithProxy*/WithInsecureSkipVerify 同用时请放在它们之前)
 func WithTransport(rt http.RoundTripper) Option {
 	return func(c *Client) { c.hc.Transport = rt }
+}
+
+// WithProxyURL 设置固定代理地址,如 "http://127.0.0.1:7890"
+func WithProxyURL(rawurl string) Option {
+	return func(c *Client) {
+		if t, ok := c.hc.Transport.(*http.Transport); ok {
+			t.Proxy = func(_ *http.Request) (*url.URL, error) {
+				return url.Parse(rawurl)
+			}
+		}
+	}
+}
+
+// WithProxyFunc 设置动态代理函数(每次请求调用,适合代理地址从配置热读取的场景)
+func WithProxyFunc(f func(*http.Request) (*url.URL, error)) Option {
+	return func(c *Client) {
+		if t, ok := c.hc.Transport.(*http.Transport); ok {
+			t.Proxy = f
+		}
+	}
+}
+
+// WithInsecureSkipVerify 跳过 TLS 证书校验(自签名证书/抓包调试场景,生产慎用)
+func WithInsecureSkipVerify() Option {
+	return func(c *Client) {
+		if t, ok := c.hc.Transport.(*http.Transport); ok {
+			if t.TLSClientConfig == nil {
+				t.TLSClientConfig = &tls.Config{}
+			}
+			t.TLSClientConfig.InsecureSkipVerify = true
+		}
+	}
 }
 
 // WithDebug 开启请求/响应日志
@@ -227,26 +260,76 @@ func (c *Client) doOnce(ctx context.Context, method, rawurl string, body []byte,
 	}, nil
 }
 
+// ReqOption 单次请求的配置项(目前用于附加 header)
+type ReqOption func(http.Header)
+
+// WithReqHeader 为本次请求附加一个 header
+func WithReqHeader(key, value string) ReqOption {
+	return func(h http.Header) { h.Set(key, value) }
+}
+
+// WithReqHeaders 为本次请求附加一组 header(map[string][]string 可直接传入)
+func WithReqHeaders(headers http.Header) ReqOption {
+	return func(h http.Header) {
+		for k, vs := range headers {
+			for _, v := range vs {
+				h.Add(k, v)
+			}
+		}
+	}
+}
+
+// buildHeader 把 contentType 和请求级 option 合成 header
+func buildHeader(contentType string, opts []ReqOption) http.Header {
+	header := http.Header{}
+	if contentType != "" {
+		header.Set("Content-Type", contentType)
+	}
+	for _, opt := range opts {
+		opt(header)
+	}
+	return header
+}
+
 // Get 发起 GET 请求
-func (c *Client) Get(ctx context.Context, url string) (*Response, error) {
-	return c.Do(ctx, http.MethodGet, url, nil, nil)
+func (c *Client) Get(ctx context.Context, url string, opts ...ReqOption) (*Response, error) {
+	return c.Do(ctx, http.MethodGet, url, nil, buildHeader("", opts))
+}
+
+// GetBytes 发起 GET 请求并返回响应 body(非 2xx 返回错误),适合下载文件/原始内容
+func (c *Client) GetBytes(ctx context.Context, url string, opts ...ReqOption) ([]byte, error) {
+	resp, err := c.Get(ctx, url, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if !resp.OK() {
+		return nil, fmt.Errorf("http 状态码 %d: %s", resp.StatusCode, truncate(resp.String(), 200))
+	}
+	return resp.Body, nil
 }
 
 // Post 发起 POST 请求
-func (c *Client) Post(ctx context.Context, url string, contentType string, body io.Reader) (*Response, error) {
-	header := http.Header{}
-	header.Set("Content-Type", contentType)
-	return c.Do(ctx, http.MethodPost, url, body, header)
+func (c *Client) Post(ctx context.Context, url string, contentType string, body io.Reader, opts ...ReqOption) (*Response, error) {
+	return c.Do(ctx, http.MethodPost, url, body, buildHeader(contentType, opts))
 }
 
 // PostForm 发起表单 POST 请求
-func (c *Client) PostForm(ctx context.Context, url string, form url.Values) (*Response, error) {
-	return c.Post(ctx, url, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
+func (c *Client) PostForm(ctx context.Context, url string, form url.Values, opts ...ReqOption) (*Response, error) {
+	return c.Post(ctx, url, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()), opts...)
+}
+
+// PostFormJSON 发起表单 POST 请求并把 JSON 响应反序列化到 out(out 可为 nil)
+func (c *Client) PostFormJSON(ctx context.Context, url string, form url.Values, out any, opts ...ReqOption) error {
+	resp, err := c.PostForm(ctx, url, form, opts...)
+	if err != nil {
+		return err
+	}
+	return decodeJSONResponse(resp, out)
 }
 
 // GetJSON 发起 GET 请求并把 JSON 响应反序列化到 out(out 可为 nil)
-func (c *Client) GetJSON(ctx context.Context, url string, out any) error {
-	resp, err := c.Get(ctx, url)
+func (c *Client) GetJSON(ctx context.Context, url string, out any, opts ...ReqOption) error {
+	resp, err := c.Get(ctx, url, opts...)
 	if err != nil {
 		return err
 	}
@@ -254,16 +337,12 @@ func (c *Client) GetJSON(ctx context.Context, url string, out any) error {
 }
 
 // PostJSON 发起 JSON POST 请求并把 JSON 响应反序列化到 out(out 可为 nil)
-func (c *Client) PostJSON(ctx context.Context, url string, in any, out any) error {
-	var body io.Reader
-	if in != nil {
-		data, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("请求 body 序列化失败: %w", err)
-		}
-		body = bytes.NewReader(data)
+func (c *Client) PostJSON(ctx context.Context, url string, in any, out any, opts ...ReqOption) error {
+	body, err := marshalJSONBody(in)
+	if err != nil {
+		return err
 	}
-	resp, err := c.Post(ctx, url, "application/json", body)
+	resp, err := c.Post(ctx, url, "application/json", body, opts...)
 	if err != nil {
 		return err
 	}
@@ -271,22 +350,27 @@ func (c *Client) PostJSON(ctx context.Context, url string, in any, out any) erro
 }
 
 // PutJSON 发起 JSON PUT 请求并把 JSON 响应反序列化到 out(out 可为 nil)
-func (c *Client) PutJSON(ctx context.Context, url string, in any, out any) error {
-	var body io.Reader
-	if in != nil {
-		data, err := json.Marshal(in)
-		if err != nil {
-			return fmt.Errorf("请求 body 序列化失败: %w", err)
-		}
-		body = bytes.NewReader(data)
+func (c *Client) PutJSON(ctx context.Context, url string, in any, out any, opts ...ReqOption) error {
+	body, err := marshalJSONBody(in)
+	if err != nil {
+		return err
 	}
-	header := http.Header{}
-	header.Set("Content-Type", "application/json")
-	resp, err := c.Do(ctx, http.MethodPut, url, body, header)
+	resp, err := c.Do(ctx, http.MethodPut, url, body, buildHeader("application/json", opts))
 	if err != nil {
 		return err
 	}
 	return decodeJSONResponse(resp, out)
+}
+
+func marshalJSONBody(in any) (io.Reader, error) {
+	if in == nil {
+		return nil, nil
+	}
+	data, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("请求 body 序列化失败: %w", err)
+	}
+	return bytes.NewReader(data), nil
 }
 
 func decodeJSONResponse(resp *Response, out any) error {
@@ -313,12 +397,21 @@ func truncate(s string, n int) string {
 var Default = New()
 
 // Get 使用默认客户端发起 GET 请求
-func Get(ctx context.Context, url string) (*Response, error) { return Default.Get(ctx, url) }
+func Get(ctx context.Context, url string, opts ...ReqOption) (*Response, error) {
+	return Default.Get(ctx, url, opts...)
+}
+
+// GetBytes 使用默认客户端发起 GET 请求并返回响应 body
+func GetBytes(ctx context.Context, url string, opts ...ReqOption) ([]byte, error) {
+	return Default.GetBytes(ctx, url, opts...)
+}
 
 // GetJSON 使用默认客户端发起 GET 请求并解析 JSON 响应
-func GetJSON(ctx context.Context, url string, out any) error { return Default.GetJSON(ctx, url, out) }
+func GetJSON(ctx context.Context, url string, out any, opts ...ReqOption) error {
+	return Default.GetJSON(ctx, url, out, opts...)
+}
 
 // PostJSON 使用默认客户端发起 JSON POST 请求
-func PostJSON(ctx context.Context, url string, in, out any) error {
-	return Default.PostJSON(ctx, url, in, out)
+func PostJSON(ctx context.Context, url string, in, out any, opts ...ReqOption) error {
+	return Default.PostJSON(ctx, url, in, out, opts...)
 }

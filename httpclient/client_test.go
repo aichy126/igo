@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	neturl "net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -138,5 +139,83 @@ func TestDefaultHeaders(t *testing.T) {
 	_, err := New(WithUserAgent("igo-test")).Get(t.Context(), srv.URL)
 	if err != nil {
 		t.Fatalf("Get error: %v", err)
+	}
+}
+
+// TestReqHeaderOptions 验证单次请求 header 选项
+func TestReqHeaderOptions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Custom") != "abc" || r.Header.Get("Accept-Language") != "zh-CN" {
+			t.Errorf("缺少请求级 header: %v", r.Header)
+		}
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("{}"))
+	}))
+	defer srv.Close()
+
+	extra := http.Header{}
+	extra.Set("Accept-Language", "zh-CN")
+	err := New().GetJSON(t.Context(), srv.URL, nil,
+		WithReqHeader("X-Custom", "abc"),
+		WithReqHeaders(extra),
+	)
+	if err != nil {
+		t.Fatalf("GetJSON error: %v", err)
+	}
+}
+
+// TestGetBytes 验证 GetBytes 返回原始 body,非 2xx 报错
+func TestGetBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/404" {
+			w.WriteHeader(404)
+			return
+		}
+		_, _ = w.Write([]byte("raw-bytes"))
+	}))
+	defer srv.Close()
+
+	data, err := New().GetBytes(t.Context(), srv.URL)
+	if err != nil || string(data) != "raw-bytes" {
+		t.Errorf("GetBytes = %q, %v", data, err)
+	}
+	if _, err := New().GetBytes(t.Context(), srv.URL+"/404"); err == nil {
+		t.Error("非 2xx 应返回错误")
+	}
+}
+
+// TestPostFormJSON 验证表单提交 + JSON 响应解析
+func TestPostFormJSON(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		_ = json.NewEncoder(w).Encode(map[string]string{"got": r.PostForm.Get("input")})
+	}))
+	defer srv.Close()
+
+	var out struct {
+		Got string `json:"got"`
+	}
+	form := neturl.Values{}
+	form.Set("input", "hello")
+	err := New().PostFormJSON(t.Context(), srv.URL, form, &out)
+	if err != nil || out.Got != "hello" {
+		t.Errorf("PostFormJSON out=%v err=%v", out, err)
+	}
+}
+
+// TestProxyOption 验证代理选项真的作用在 Transport 上
+func TestProxyOption(t *testing.T) {
+	c := New(WithProxyURL("http://127.0.0.1:7890"), WithInsecureSkipVerify())
+	tr, ok := c.hc.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("Transport 类型错误")
+	}
+	if tr.Proxy == nil {
+		t.Error("代理未设置")
+	} else if u, _ := tr.Proxy(nil); u == nil || u.Host != "127.0.0.1:7890" {
+		t.Errorf("代理地址错误: %v", u)
+	}
+	if tr.TLSClientConfig == nil || !tr.TLSClientConfig.InsecureSkipVerify {
+		t.Error("InsecureSkipVerify 未生效")
 	}
 }

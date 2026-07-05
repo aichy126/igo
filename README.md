@@ -210,6 +210,21 @@ err = client.GetJSON(ctx, url, &out)
 resp, err := client.Get(ctx, url)
 fmt.Println(resp.StatusCode, resp.String())
 
+//下载原始内容(非 2xx 自动报错)
+data, err := client.GetBytes(ctx, url)
+
+//单次请求附加 header
+err = client.GetJSON(ctx, url, &out, httpclient.WithReqHeader("Authorization", "Bearer xxx"))
+
+//表单提交 + JSON 响应
+err = client.PostFormJSON(ctx, url, formValues, &out)
+
+//代理与自签证书场景
+proxyClient := httpclient.New(
+	httpclient.WithProxyURL("http://127.0.0.1:7890"), //固定代理;动态代理用 WithProxyFunc
+	httpclient.WithInsecureSkipVerify(),               //跳过 TLS 校验(生产慎用)
+)
+
 //简单场景直接用包级默认客户端
 resp, err = httpclient.Get(ctx, url)
 ```
