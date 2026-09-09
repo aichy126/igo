@@ -237,6 +237,17 @@ resp, err = httpclient.Get(ctx, url)
 IGO_LOCAL_ADDRESS=:9000 IGO_LOCAL_DEBUG=false ./myapp
 ```
 
+数据库与 Redis 这类嵌套配置同样支持,DSN / 密码不必写进配置文件:
+
+```shell
+IGO_MYSQL_DEFAULT_DATA_SOURCE="user:pass@tcp(db:3306)/app" \
+IGO_REDIS_DEFAULT_ADDRESS=redis:6379 \
+IGO_REDIS_DEFAULT_PASSWORD=secret ./myapp
+```
+
+注意:空环境变量会被 viper 当作「未设置」而回落到配置文件(`AllowEmptyEnv` 默认关闭),
+所以不能用空变量把配置文件里的值清掉——需要空值请直接删掉配置里那一行。
+
 ### 日志级别热更新
 
 - 文件配置修改 `local.logger.level` 保存后即时生效(配置热重载自动同步),无需重启
