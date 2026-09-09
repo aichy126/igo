@@ -77,6 +77,7 @@ func (rm *RedisManager) initRedis(conf *config.Config) error {
 		if err := rc.parse(itemRedisConfig); err != nil {
 			return fmt.Errorf("redis 配置 [redis.%s] 解析失败: %w", name, err)
 		}
+		applyEnvOverride(conf, "redis."+name, &rc)
 		r, err := rm.newRedis(rc)
 		if err != nil {
 			return fmt.Errorf("redis [%s] 初始化失败: %w", name, err)

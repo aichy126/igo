@@ -105,6 +105,7 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 			return fmt.Errorf("mysql 配置 [mysql.%s] 解析失败: %w", k, err)
 		}
 		data.DbType = "mysql"
+		applyEnvOverride(conf, "mysql."+k, data)
 		dbConfigList[k] = data
 	}
 
@@ -115,6 +116,7 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 			return fmt.Errorf("sqlite 配置 [sqlite.%s] 解析失败: %w", k, err)
 		}
 		data.DbType = "sqlite3"
+		applyEnvOverride(conf, "sqlite."+k, data)
 		dbConfigList[k] = data
 	}
 
@@ -132,6 +134,35 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 		db.resources[name] = dm
 	}
 	return nil
+}
+
+// applyEnvOverride 让 IGO_ 环境变量对数据库配置生效。
+//
+// 为什么需要这一步：viper 的 AutomaticEnv 只在按【完整 key】调用 Get 系列方法时生效，
+// 而上面用的 GetStringMap 返回的是配置文件里的原始 map，环境变量不会被合并进去
+// （viper 的已知行为）。缺了这一步，config 包承诺的
+// 「环境变量优先级高于配置文件，适合 Docker/K8s 部署时无需改配置文件」
+// 对 mysql / sqlite 这类嵌套配置就不成立——IGO_MYSQL_DEFAULT_DATA_SOURCE
+// 会被静默忽略，而 data_source 恰恰是最需要在容器里注入的东西。
+//
+// 只在环境变量给出有效值时才覆盖：GetString 在环境变量缺失时会回落到配置文件的值，
+// 所以这里的判空既挡住了空环境变量，也保证了无环境变量时行为不变。
+func applyEnvOverride(conf *viper.Viper, prefix string, c *DBConfig) {
+	if v := strings.TrimSpace(conf.GetString(prefix + ".data_source")); v != "" {
+		c.Datasource = v
+	}
+	if v := conf.GetInt(prefix + ".max_idle"); v > 0 {
+		c.MaxIdle = v
+	}
+	if v := conf.GetInt(prefix + ".max_open"); v > 0 {
+		c.MaxOpen = v
+	}
+	if v := conf.GetInt(prefix + ".max_idle_life"); v > 0 {
+		c.MaxIdleLife = v
+	}
+	if conf.IsSet(prefix + ".is_debug") {
+		c.IsDebug = conf.GetBool(prefix + ".is_debug")
+	}
 }
 
 // DatabaseManager
