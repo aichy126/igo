@@ -13,6 +13,14 @@ import (
 	"github.com/google/uuid"
 )
 
+const (
+	// DefaultReadHeaderTimeout 读完请求头的时限，防慢速连接占着不放
+	DefaultReadHeaderTimeout = 20 * time.Second
+	// DefaultIdleTimeout 空闲 keep-alive 连接的回收时限。
+	// 设了它，关闭时才不会为了等一堆没人用的连接而耗光优雅关闭的时间。
+	DefaultIdleTimeout = 60 * time.Second
+)
+
 // Web
 type Web struct {
 	Router *gin.Engine
@@ -102,6 +110,13 @@ func (s *Web) Run() error {
 	s.server = &http.Server{
 		Addr:    address,
 		Handler: s.Router,
+		// 刻意不设 ReadTimeout / WriteTimeout：WriteTimeout 会掐断 SSE 和大文件下载，
+		// ReadTimeout 会掐断大文件上传，这两种长连接是业务的正常形态，不该由框架一刀切。
+		//
+		// IdleTimeout 才是关键：不设的话空闲的 keep-alive 连接会一直挂着，
+		// 关闭时 Shutdown 得等它们自己走完，把优雅关闭直接拖成超时。
+		ReadHeaderTimeout: DefaultReadHeaderTimeout,
+		IdleTimeout:       DefaultIdleTimeout,
 	}
 	fmt.Printf("Gin Address:%s\n", address)
 	err := s.server.ListenAndServe()
@@ -113,9 +128,21 @@ func (s *Web) Run() error {
 }
 
 // Shutdown 优雅关闭Web服务器
+//
+// ctx 到期后会强制断开仍未走完的连接，不再干等。
+// 没有这道兜底的话，SSE、websocket、被客户端占着的 keep-alive 连接
+// 都会让 Shutdown 一直等到 ctx 超时，而调用方（以及 docker stop）
+// 只能陪着一起耗 —— 最后照样是 SIGKILL，白白多花十几秒。
 func (s *Web) Shutdown(ctx context.Context) error {
-	if s.server != nil {
-		return s.server.Shutdown(ctx)
+	if s.server == nil {
+		return nil
 	}
-	return nil
+	err := s.server.Shutdown(ctx)
+	if err != nil {
+		// 走到这里说明还有连接赖着不走，直接断掉，让进程能立刻退出
+		if cerr := s.server.Close(); cerr != nil {
+			log.Error("强制关闭 HTTP 服务失败", log.Any("error", cerr))
+		}
+	}
+	return err
 }
