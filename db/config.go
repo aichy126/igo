@@ -1,17 +1,44 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/aichy126/igo/log"
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
+	"modernc.org/sqlite"
 	"xorm.io/xorm"
 )
+
+// SQLite 驱动用 modernc.org/sqlite（纯 Go）而不是 mattn/go-sqlite3：
+// mattn 要 CGO，`CGO_ENABLED=0` 交叉编译出来的二进制里它只剩一个 Open 就报错的桩。
+// xorm 的 sqlite 方言固定找 database/sql 里叫 "sqlite3" 的驱动，所以把 modernc 也注册到这个名字上
+// （modernc 自己注册的是 "sqlite"，两个名字指向同一个实现）。
+func init() {
+	sql.Register("sqlite3", &sqlite.Driver{})
+}
+
+// sqliteDefaultPragmas 没写 _pragma 的 SQLite 连接串补上这两条：
+//   - busy_timeout：另一个连接在写时等它，而不是立刻报 "database is locked"；
+//   - journal_mode(WAL)：读不阻塞写、写不阻塞读，多连接下锁冲突基本只剩「两个写者同时提交」这一种，
+//     由 busy_timeout 兜底。
+//
+// 这两条是 SQLite 多连接使用的底线配置，忘写就会在并发下随机报锁错误，所以由框架兜底而不是靠每个项目记得。
+const sqliteDefaultPragmas = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+
+func sqliteDSN(ds string) string {
+	if strings.Contains(ds, "_pragma=") {
+		return ds
+	}
+	if strings.Contains(ds, "?") {
+		return ds + "&" + sqliteDefaultPragmas
+	}
+	return ds + "?" + sqliteDefaultPragmas
+}
 
 const (
 	defaultIdleLifeTime = 3600
@@ -117,6 +144,7 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 		}
 		data.DbType = "sqlite3"
 		applyEnvOverride(conf, "sqlite."+k, data)
+		data.Datasource = sqliteDSN(data.Datasource)
 		dbConfigList[k] = data
 	}
 
