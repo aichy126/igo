@@ -12,8 +12,17 @@ import (
 	"github.com/aichy126/igo/log"
 )
 
-// DefaultShutdownTimeout 默认优雅关闭超时时间
+// DefaultShutdownTimeout 默认优雅关闭超时时间（所有关闭钩子共用这一份预算）
 const DefaultShutdownTimeout = 10 * time.Second
+
+// SlowShutdownHookThreshold 超过这个耗时的关闭钩子会被记一条 warn，
+// 免得下次又只剩「优雅关闭超时」一句话、不知道是谁拖的。
+const SlowShutdownHookThreshold = time.Second
+
+// DefaultWebShutdownTimeout HTTP 服务优雅关闭的时限。
+// 刻意小于 DefaultShutdownTimeout：Web 是第一个关闭的组件，
+// 给它留满整份预算的话，它一超时整体也就超时了，Cache / DB 就没机会干净收尾。
+const DefaultWebShutdownTimeout = 5 * time.Second
 
 // LifecycleManager 应用生命周期管理器
 type LifecycleManager struct {
@@ -153,8 +162,19 @@ func (lm *LifecycleManager) executeShutdownHooks() error {
 
 	var firstErr error
 	for i := len(hooks) - 1; i >= 0; i-- {
-		if err := hooks[i](); err != nil {
-			log.Error("关闭钩子执行失败", log.Any("index", i), log.Any("error", err))
+		begin := time.Now()
+		err := hooks[i]()
+		elapsed := time.Since(begin)
+
+		// 记下每个钩子的耗时：整体超时被强制退出时，光看「优雅关闭超时」
+		// 完全不知道是谁拖的，只能靠猜。慢钩子必须自己留下名字。
+		if elapsed >= SlowShutdownHookThreshold {
+			log.Warn("关闭钩子耗时过长",
+				log.Any("index", i), log.Any("elapsed", elapsed.String()))
+		}
+		if err != nil {
+			log.Error("关闭钩子执行失败",
+				log.Any("index", i), log.Any("elapsed", elapsed.String()), log.Any("error", err))
 			if firstErr == nil {
 				firstErr = err
 			}

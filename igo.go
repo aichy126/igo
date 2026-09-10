@@ -98,7 +98,9 @@ func NewApp(ConfigPath string) (*Application, error) {
 		return a.Cache.Close()
 	})
 	a.lifecycle.AddShutdownHook(func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), lifecycle.DefaultShutdownTimeout)
+		// 这里必须比整体超时短：Web 是第一个执行的钩子，若给它整个预算，
+		// 它一超时整体也就超时了，后面的 Cache / DB 根本轮不到关闭。
+		ctx, cancel := context.WithTimeout(context.Background(), lifecycle.DefaultWebShutdownTimeout)
 		defer cancel()
 		return a.Web.Shutdown(ctx)
 	})

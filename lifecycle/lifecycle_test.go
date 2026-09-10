@@ -85,3 +85,13 @@ func TestShutdownOnlyOnce(t *testing.T) {
 		t.Errorf("关闭钩子执行了 %d 次, 应为 1 次", count)
 	}
 }
+
+// Web 的关闭超时必须小于整体预算。
+// 两者相等的话，Web 一超时整体也就超时了，排在它后面的 Cache / DB
+// 根本轮不到执行 —— 这正是「优雅关闭超时(10s),强制退出」那条日志的由来。
+func TestWebShutdownTimeoutLeavesRoomForOtherHooks(t *testing.T) {
+	if DefaultWebShutdownTimeout >= DefaultShutdownTimeout {
+		t.Errorf("Web 关闭超时(%v)必须小于整体超时(%v)，否则后面的钩子没机会收尾",
+			DefaultWebShutdownTimeout, DefaultShutdownTimeout)
+	}
+}
