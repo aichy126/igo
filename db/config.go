@@ -3,6 +3,8 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,22 +24,60 @@ func init() {
 	sql.Register("sqlite3", &sqlite.Driver{})
 }
 
-// sqliteDefaultPragmas 没写 _pragma 的 SQLite 连接串补上这两条：
+// sqliteDefaults 是 SQLite 连接串的兜底参数，连接串里没写的才补（按 key 逐条判断，写了的一律尊重）：
 //   - busy_timeout：另一个连接在写时等它，而不是立刻报 "database is locked"；
 //   - journal_mode(WAL)：读不阻塞写、写不阻塞读，多连接下锁冲突基本只剩「两个写者同时提交」这一种，
-//     由 busy_timeout 兜底。
+//     由 busy_timeout 兜底；
+//   - _txlock=immediate：事务在 BEGIN 时就拿写锁。默认的 deferred 事务先读后写时要把读锁升级成写锁，
+//     WAL 下若别的连接已提交过写，升级会立刻失败（SQLITE_BUSY），busy_timeout 管不到这种情况——
+//     不改的话，「事务里先查再改」这种 MySQL 下天经地义的写法在 SQLite 并发下会随机失败；
+//   - _time_format=sqlite：time.Time 参数按 "2006-01-02 15:04:05.999999999-07:00" 写入。
+//     驱动默认写的是 t.String()（带 "CST m=+4.1" 这类尾巴），xorm 结构体写入会自己先格式化所以没事，
+//     但 Update(map{"updated_at": time.Now()}) 这类写法会把原值直接交给驱动。
 //
-// 这两条是 SQLite 多连接使用的底线配置，忘写就会在并发下随机报锁错误，所以由框架兜底而不是靠每个项目记得。
-const sqliteDefaultPragmas = "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+// 这几条是 SQLite 当 MySQL 用的底线配置，忘写就会在并发下随机报锁错误或写出格式错乱的时间，
+// 所以由框架兜底而不是靠每个项目记得。
+var sqliteDefaults = []struct{ key, param string }{
+	{"busy_timeout", "_pragma=busy_timeout(5000)"},
+	{"journal_mode", "_pragma=journal_mode(WAL)"},
+	{"_txlock=", "_txlock=immediate"},
+	{"_time_format=", "_time_format=sqlite"},
+}
 
 func sqliteDSN(ds string) string {
-	if strings.Contains(ds, "_pragma=") {
-		return ds
+	lower := strings.ToLower(ds)
+	for _, d := range sqliteDefaults {
+		if strings.Contains(lower, d.key) {
+			continue
+		}
+		if strings.Contains(ds, "?") {
+			ds += "&" + d.param
+		} else {
+			ds += "?" + d.param
+		}
 	}
-	if strings.Contains(ds, "?") {
-		return ds + "&" + sqliteDefaultPragmas
+	return ds
+}
+
+// sqliteEnsureDir 建好库文件所在目录。驱动只建文件、不建目录，而 data_source 惯例写 "./data/app.db"——
+// 新机器 / 新容器上 data/ 还不存在时，启动只报一句看不出原因的 "unable to open database file"。
+// 内存库（:memory: / mode=memory）没有文件，跳过。
+func sqliteEnsureDir(ds string) error {
+	path := strings.TrimPrefix(ds, "file:")
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
 	}
-	return ds + "?" + sqliteDefaultPragmas
+	if path == "" || strings.Contains(path, ":memory:") || strings.Contains(ds, "mode=memory") {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	if dir == "." {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("创建 SQLite 库目录 %s 失败: %w", dir, err)
+	}
+	return nil
 }
 
 const (
@@ -145,6 +185,9 @@ func (db *DBResourceManager) initFromToml(conf *viper.Viper) error {
 		data.DbType = "sqlite3"
 		applyEnvOverride(conf, "sqlite."+k, data)
 		data.Datasource = sqliteDSN(data.Datasource)
+		if err := sqliteEnsureDir(data.Datasource); err != nil {
+			return fmt.Errorf("数据库 [%s] 初始化失败: %w", k, err)
+		}
 		dbConfigList[k] = data
 	}
 

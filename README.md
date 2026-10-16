@@ -278,6 +278,10 @@ app.GetShutdownContext()                   //应用关闭时被 cancel,用于停
 
 ## 从旧版本升级(迁移说明)
 
+### v0.4.4 → v0.4.5(SQLite 默认参数)
+
+无需改代码。SQLite 连接串里没写的参数会多补两条:`_txlock=immediate`(事务 BEGIN 即拿写锁,消除「先读后写」事务的随机 `SQLITE_BUSY`)与 `_time_format=sqlite`(`map` 更新里的 `time.Time` 不再写成 `t.String()`);以前「写了任意 `_pragma` 就一条都不补」改为按 key 逐条补。库文件目录不存在时自动创建。详见 [docs/database.md](docs/database.md#sqlite)。
+
 ### v0.3.x → v0.4.0
 
 1. **httpclient 完全重写**(API 不兼容):旧的 `NewClient().Debug().SetDefaultTimeout()` 链式 API 和 `HttpSettings`/`HttpRequest` 已删除。迁移示例:

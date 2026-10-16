@@ -9,6 +9,7 @@ import (
 	"github.com/aichy126/igo/log"
 	_ "github.com/go-sql-driver/mysql"
 	"xorm.io/xorm"
+	"xorm.io/xorm/schemas"
 )
 
 // Db
@@ -45,6 +46,12 @@ func (s *DB) NewDBTable(dbname string, tableName string) *Repo {
 	return &Repo{dm.WriteDB, tableName}
 }
 
+// IsSQLite 当前库是否 SQLite。同时支持 MySQL 与 SQLite 的项目，个别函数两边不同名
+// （CHAR_LENGTH / LENGTH、DATE_ADD / datetime(...) 等）时用它分支，其余一律走 xorm 条件构造。
+func (repo *Repo) IsSQLite() bool {
+	return repo.Engine.Dialect().URI().DBType == schemas.SQLITE
+}
+
 // SetTableName 修改 Repo 绑定的表名
 func (repo *Repo) SetTableName(name string) {
 	if len(name) == 0 {
@@ -74,7 +81,7 @@ func (repo *Repo) InsertOne(beans any) (int64, error) {
 	defer sess.Close()
 	r, err := sess.InsertOne(beans)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return r, err
 }
@@ -84,7 +91,7 @@ func (repo *Repo) Insert(beans ...any) (int64, error) {
 	defer sess.Close()
 	r, err := sess.Insert(beans...)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return r, err
 }
@@ -94,7 +101,7 @@ func (repo *Repo) Get(bean any) (bool, error) {
 	defer sess.Close()
 	r, err := sess.Get(bean)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return r, err
 }
@@ -119,7 +126,7 @@ func (repo *Repo) Query(sql string, paramStr ...any) (resultsSlice []map[string]
 	defer sess.Close()
 	r, err := sess.Query(args...)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return r, err
 }
@@ -129,7 +136,7 @@ func (repo *Repo) Find(bean any, condiBeans ...any) error {
 	defer sess.Close()
 	err := sess.Find(bean, condiBeans)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return err
 }
@@ -144,7 +151,7 @@ func (repo *Repo) Exec(sql string, args ...any) (sql.Result, error) {
 	}
 	r, err := repo.Engine.Exec(params...)
 	if err != nil {
-		log.Error("Mysql", log.Any("error", err.Error()))
+		log.Error("DB", log.Any("error", err.Error()))
 	}
 	return r, err
 }
