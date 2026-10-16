@@ -17,11 +17,47 @@ max_idle_life = 3600
 is_debug = false
 
 [sqlite.local]
-data_source = "file:test.db?cache=shared&mode=rwc"
-max_idle = 5
-max_open = 10
+data_source = "./data/app.db"   # 目录不存在会自动创建
+max_idle = 1
+max_open = 1
 is_debug = true
 ```
+
+### SQLite
+
+驱动是纯 Go 的 `modernc.org/sqlite`，`CGO_ENABLED=0` 交叉编译照常可用（**不要换成 mattn/go-sqlite3**）。
+
+连接串里没写的下列参数由框架补上（写了的一律尊重，按 key 逐条判断）：
+
+| 参数 | 为什么 |
+|---|---|
+| `_pragma=busy_timeout(5000)` | 别的连接在写时等待，而不是立刻 `database is locked` |
+| `_pragma=journal_mode(WAL)` | 读写互不阻塞 |
+| `_txlock=immediate` | 事务 BEGIN 即拿写锁。默认 deferred 事务「先读后写」升级写锁时会直接 `SQLITE_BUSY`，busy_timeout 管不到 |
+| `_time_format=sqlite` | `Update(map{"t": time.Now()})` 这类直接传 `time.Time` 的写法，驱动默认写成 `t.String()`（带 `m=+…`） |
+
+库文件所在目录不存在时自动创建。**不要加 `cache=shared`**：共享缓存与 WAL 一起用会退化成表级锁（`SQLITE_LOCKED`）。
+
+`max_open = 1` 是单机应用的稳妥默认（结构上没有连接间锁竞争）；读多的场景可以调大，上面的兜底参数保证多连接下也不随机报锁。
+
+### 同时支持 MySQL 与 SQLite
+
+配置名相同（`[mysql.app]` / `[sqlite.app]`）时，代码里 `NewDBTable("app", ...)` 不用改，换配置段即可切库。要点：
+
+- 优先用 xorm 条件构造与两边通用的函数（`count` / `substr` / `like` / `coalesce`）；个别不同名的用 `repo.IsSQLite()` 分支：
+
+  ```go
+  // 过期判断：MySQL 用 DATE_ADD，SQLite 用 datetime()
+  expr := "DATE_ADD(created_at, INTERVAL ttl SECOND) < ?"
+  if repo.IsSQLite() {
+      expr = "datetime(created_at, '+' || ttl || ' seconds') < ?"
+  }
+  repo.Where(expr, time.Now().Format("2006-01-02 15:04:05")).Delete(&Token{})
+  ```
+
+- upsert：MySQL `ON DUPLICATE KEY UPDATE`，SQLite `ON CONFLICT(...) DO UPDATE`——同样分支，或在事务里先查后写（SQLite 已是 immediate 事务，不会撞锁）。
+- 给已有表加列（Sync2）：SQLite 的 `ADD COLUMN` 不接受非常量默认值，也不接受「`NOT NULL` 且无默认值」——新字段一律带常量默认值（`not null default 0` / `default ''`）。新建表不受此限。
+- 时间与 SQL 里的时间字面量比较时，传 `Format("2006-01-02 15:04:05")` 的字符串最稳（xorm 结构体写入的就是这个格式）。
 
 ## 基本使用
 
